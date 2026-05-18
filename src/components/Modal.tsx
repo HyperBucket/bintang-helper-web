@@ -40,7 +40,7 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
   const sheetStyle: React.CSSProperties = keyboardOpen
     ? {
         marginBottom: vvBottom,
-        maxHeight: (vvHeight ?? window.innerHeight) - 20,
+        maxHeight: (vvHeight ?? window.innerHeight) - 60,
         transition: 'none',
       }
     : {

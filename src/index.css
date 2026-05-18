@@ -666,7 +666,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-.modal-body { flex: 1; overflow-y: auto; }
+.modal-body { overflow-y: auto; min-height: 0; }
 
 .modal-actions {
   display: flex;
