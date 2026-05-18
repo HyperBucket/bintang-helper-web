@@ -9,7 +9,8 @@ interface ModalProps {
 }
 
 export function Modal({ title, children, actions, onClose }: ModalProps) {
-  const [bottomOffset, setBottomOffset] = useState(0)
+  const [vvHeight, setVvHeight] = useState<number | null>(null)
+  const [vvBottom, setVvBottom] = useState(0)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -17,14 +18,16 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
-  // Push sheet up when soft keyboard opens
+  // Track visual viewport so the sheet stays above the soft keyboard
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
-      const offset = window.innerHeight - vv.height - vv.offsetTop
-      setBottomOffset(Math.max(0, offset))
+      const bottom = window.innerHeight - vv.offsetTop - vv.height
+      setVvBottom(Math.max(0, bottom))
+      setVvHeight(vv.height)
     }
+    update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
     return () => {
@@ -33,11 +36,22 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
     }
   }, [])
 
+  const keyboardOpen = vvBottom > 50
+  const sheetStyle: React.CSSProperties = keyboardOpen
+    ? {
+        marginBottom: vvBottom,
+        maxHeight: (vvHeight ?? window.innerHeight) - 20,
+        transition: 'none',
+      }
+    : {
+        maxHeight: '82%',
+      }
+
   const root = document.getElementById('modal-root') ?? document.body
 
   return createPortal(
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-sheet" style={{ marginBottom: bottomOffset, transition: bottomOffset ? 'none' : 'margin 0.2s' }}>
+      <div className="modal-sheet" style={sheetStyle}>
         <div className="modal-handle" />
         <div className="modal-title">{title}</div>
         <div className="modal-body">{children}</div>
