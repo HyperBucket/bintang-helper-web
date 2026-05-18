@@ -15,6 +15,8 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
+  const root = document.getElementById('modal-root') ?? document.body
+
   return createPortal(
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal-sheet">
@@ -24,6 +26,6 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
         {actions && <div className="modal-actions">{actions}</div>}
       </div>
     </div>,
-    document.body
+    root
   )
 }

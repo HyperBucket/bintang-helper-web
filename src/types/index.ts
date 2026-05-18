@@ -20,7 +20,7 @@ export interface Court {
 }
 
 export interface DisplayAccount extends Account {
-  status: 'unused' | 'in_session' | 'queued'
+  status: 'unused' | 'in_session' | 'scheduled' | 'queued'
   courtId: string
   courtName: string
   statusLabel: string

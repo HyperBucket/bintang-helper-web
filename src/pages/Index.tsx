@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { Modal } from '../components/Modal'
+import { TimePicker } from '../components/SessionForm'
 import type { Account, Court, DisplayAccount } from '../types'
-import { formatCountdown, formatClockTime, SESSION_DURATION } from '../utils'
+import { formatCountdown, SESSION_DURATION } from '../utils'
 
 function getDisplayAccounts(
   accounts: Account[],
@@ -36,18 +37,20 @@ function getDisplayAccounts(
     const queued = queuedMap.get(a.id)
 
     if (session) {
+      const startTime = session.court.current!.startTime
+      const isFuture = startTime > now
       const remaining = session.expiry - now
-      const isScheduled = session.court.current!.startTime > now
+      const startsIn = startTime - now
       return {
         ...a,
-        status: 'in_session',
+        status: isFuture ? 'scheduled' : 'in_session',
         courtId: session.court.id,
         courtName: session.court.name,
         statusLabel: session.court.name,
-        timerDisplay: isScheduled
-          ? `Starts ${formatClockTime(session.court.current!.startTime)}`
+        timerDisplay: isFuture
+          ? `Starts in ${formatCountdown(startsIn)}`
           : formatCountdown(remaining),
-        isScheduled,
+        isScheduled: isFuture,
         canEdit: myIds.includes(a.id),
         selectable: false,
         selected: false,
@@ -55,15 +58,16 @@ function getDisplayAccounts(
     }
 
     if (queued) {
-      const qLabel = `${queued.court.name} · Q${queued.queueIdx + 1}`
+      const qLabel = `${queued.court.name} · Queue ${queued.queueIdx + 1}`
       const isScheduled = queued.session.startTime > now
+      const startsIn = queued.session.startTime - now
       return {
         ...a,
         status: 'queued',
         courtId: queued.court.id,
         courtName: queued.court.name,
         statusLabel: qLabel,
-        timerDisplay: isScheduled ? `Starts ${formatClockTime(queued.session.startTime)}` : '',
+        timerDisplay: isScheduled ? `Starts in ${formatCountdown(startsIn)}` : '',
         isScheduled,
         canEdit: myIds.includes(a.id),
         selectable: false,
@@ -104,8 +108,23 @@ export function IndexPage() {
   // Court action modal: 'new-court' | 'join-session' | 'add-queue'
   const [actionModal, setActionModal] = useState<'new-court' | 'join-session' | 'add-queue' | null>(null)
   const [newCourtName, setNewCourtName] = useState('')
+  const [timeMode, setTimeMode] = useState<'now' | 'schedule'>('now')
   const [scheduledTime, setScheduledTime] = useState('')
   const [targetCourtId, setTargetCourtId] = useState('')
+  const [targetQueueId, setTargetQueueId] = useState('')
+
+  const currentHHMM = () => {
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+
+  const openActionModal = (m: 'new-court' | 'join-session' | 'add-queue') => {
+    setTimeMode('now')
+    setScheduledTime(currentHHMM())
+    setTargetCourtId('')
+    setTargetQueueId('')
+    setActionModal(m)
+  }
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -116,6 +135,7 @@ export function IndexPage() {
   const displayAccounts = getDisplayAccounts(accounts, courts, myIds, selected, selectMode, now)
   const unused = displayAccounts.filter(a => a.status === 'unused')
   const inSession = displayAccounts.filter(a => a.status === 'in_session')
+  const scheduled = displayAccounts.filter(a => a.status === 'scheduled')
   const queued = displayAccounts.filter(a => a.status === 'queued')
 
   const toggleSelect = (id: string) => {
@@ -130,8 +150,9 @@ export function IndexPage() {
 
   const handleAddAccount = () => {
     const { displayName, username, password } = addForm
-    if (!displayName.trim() || !username.trim() || !password.trim()) return
-    addAccount(displayName.trim(), username.trim(), password.trim())
+    if (!username.trim() || !password.trim()) return
+    const name = displayName.trim() || username.trim().slice(0, 2).toUpperCase()
+    addAccount(name, username.trim(), password.trim())
     setAddForm({ displayName: '', username: '', password: '' })
     setShowAdd(false)
   }
@@ -152,15 +173,22 @@ export function IndexPage() {
     deleteAccount(id)
   }
 
-  // Action handlers
+  const resolveTime = () => {
+    if (timeMode === 'schedule' && scheduledTime) {
+      const [h, m] = scheduledTime.split(':').map(Number)
+      const d = new Date()
+      d.setHours(h, m, 0, 0)
+      return d.getTime()
+    }
+    return Date.now()
+  }
+
   const handleCreateCourt = () => {
     if (!newCourtName.trim()) return
-    const startTime = scheduledTime ? new Date(scheduledTime).getTime() : Date.now()
-    const court = addCourt(newCourtName.trim())
-    startSession(court.id, selected, startTime)
+    const court = addCourt(`Court ${newCourtName.trim()}`)
+    startSession(court.id, selected, selected.length as 2 | 4, resolveTime())
     setActionModal(null)
     setNewCourtName('')
-    setScheduledTime('')
     cancelSelect()
     navigate(`/court/${court.id}`)
   }
@@ -169,9 +197,9 @@ export function IndexPage() {
     if (!targetCourtId) return
     const court = courts.find(c => c.id === targetCourtId)
     if (!court || !court.current) return
-    const availableSlots = court.current.capacity - court.current.accountIds.length
-    if (selected.length > availableSlots) {
-      alert(`Only ${availableSlots} slot(s) available`)
+    const total = court.current.accountIds.length + selected.length
+    if (total !== 2 && total !== 4) {
+      alert(`Sessions must have exactly 2 or 4 players. Current: ${court.current.accountIds.length}, adding: ${selected.length} = ${total}`)
       return
     }
     useStore.getState().joinSession(targetCourtId, selected)
@@ -182,48 +210,74 @@ export function IndexPage() {
 
   const handleAddQueue = () => {
     if (!targetCourtId) return
-    const startTime = scheduledTime ? new Date(scheduledTime).getTime() : 0
-    useStore.getState().addToQueue(targetCourtId, selected, startTime)
+    if (targetQueueId) {
+      useStore.getState().joinQueue(targetCourtId, targetQueueId, selected)
+    } else {
+      const startTime = timeMode === 'schedule' && scheduledTime ? resolveTime() : 0
+      useStore.getState().addToQueue(targetCourtId, selected, selected.length as 2 | 4, startTime)
+    }
     setActionModal(null)
-    setScheduledTime('')
     cancelSelect()
     navigate(`/court/${targetCourtId}`)
   }
 
-  // Courts with open spots for join-session
-  const courtsWithSlots = courts.filter(c => c.current && c.current.accountIds.length < c.current.capacity)
+  // Join is valid only when existing + selected = exactly 2 or 4
+  const courtsWithSlots = courts.filter(c => {
+    if (!c.current) return false
+    const total = c.current.accountIds.length + selected.length
+    return total === 2 || total === 4
+  })
   // Courts for queue
   const courtsWithSession = courts.filter(c => c.current !== null)
 
   const canAct = selected.length === 2 || selected.length === 4
 
   return (
-    <div className="app-shell">
+    <>
       <div className="nav-bar">
         <span className="nav-bar__title">🏸 Accounts</span>
         <button className="btn btn-primary btn-sm" onClick={() => navigate('/courts')}>Courts →</button>
       </div>
       <div className="page-content">
-        {/* Add account card */}
+
+        {/* Hero summary */}
+        <div className="hero-banner">
+          <div>
+            <div className="hero-banner__label">Player Pool</div>
+            <div className="hero-banner__value">{accounts.length} Players</div>
+            <div className="hero-banner__sub">
+              {inSession.length} playing · {scheduled.length} scheduled · {queued.length} queued
+            </div>
+          </div>
+        </div>
+
+        {/* Account card */}
         <div className="card">
           <div className="section-header">
-            <span className="section-title">Account Pool</span>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>
+            <span className="section-title">All Accounts</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add Player</button>
           </div>
 
           {/* Select mode bar */}
           {selectMode && (
-            <div className="select-bar" style={{ marginBottom: 10 }}>
-              <span className="select-bar__count">{selected.length} selected (max 4)</span>
+            <div className="select-bar">
+              <span className="select-bar__count">
+                🏸 {selected.length} selected
+                {selected.length > 0 && !canAct && (
+                  <span style={{ marginLeft: 8, fontWeight: 500, opacity: 0.85, fontSize: 11 }}>
+                    — need 2 or 4
+                  </span>
+                )}
+              </span>
               <div className="select-bar__actions">
                 {canAct && (
                   <>
-                    <button className="btn btn-success btn-sm" onClick={() => setActionModal('new-court')}>New Court</button>
+                    <button className="btn btn-success btn-sm" onClick={() => openActionModal('new-court')}>New Court</button>
                     {courtsWithSlots.length > 0 && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setTargetCourtId(''); setActionModal('join-session') }}>Join</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => openActionModal('join-session')}>Join</button>
                     )}
                     {courtsWithSession.length > 0 && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setTargetCourtId(''); setActionModal('add-queue') }}>Queue</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => openActionModal('add-queue')}>Queue</button>
                     )}
                   </>
                 )}
@@ -235,30 +289,27 @@ export function IndexPage() {
           {/* Unused accounts */}
           {unused.length > 0 && (
             <>
-              <div className="section-header">
-                <span className="section-title" style={{ color: '#6EE7B7' }}>Available</span>
+              <div className="group-label group-label--available">
+                ✓ Available
                 {!selectMode && (
-                  <button className="btn btn-secondary btn-xs" onClick={() => setSelectMode(true)}>Select</button>
+                  <button className="btn btn-secondary btn-xs" style={{ marginLeft: 'auto' }} onClick={() => setSelectMode(true)}>Select</button>
                 )}
               </div>
               {unused.map(a => (
                 <div className="account-item" key={a.id}>
                   {selectMode && (
-                    <div
-                      className={`checkbox-circle${a.selected ? ' checked' : ''}`}
-                      onClick={() => toggleSelect(a.id)}
-                    >
+                    <div className={`checkbox-circle${a.selected ? ' checked' : ''}`} onClick={() => toggleSelect(a.id)}>
                       {a.selected && '✓'}
                     </div>
                   )}
                   <div className="account-avatar">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info" onClick={selectMode ? () => toggleSelect(a.id) : undefined} style={selectMode ? { cursor: 'pointer' } : {}}>
                     <div className="account-name">{a.displayName}</div>
-                    <div className="account-status">{a.username}</div>
+                    <div className="account-status">{a.username} · {a.password}</div>
                   </div>
                   {!selectMode && a.canEdit && (
                     <div className="account-actions">
-                      <button className="btn btn-secondary btn-xs" onClick={() => openEdit(a)}>Edit</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => openEdit(a)}>Edit</button>
                       <button className="btn btn-danger btn-xs" onClick={() => handleDelete(a.id)}>Del</button>
                     </div>
                   )}
@@ -270,13 +321,10 @@ export function IndexPage() {
           {/* In Session */}
           {inSession.length > 0 && (
             <>
-              <div className="divider" />
-              <div className="section-title" style={{ marginBottom: 6, color: '#6EE7B7' }}>In Session</div>
+              <div className="group-label group-label--session">▶ In Session</div>
               {inSession.map(a => (
-                <div className="account-item" key={a.id}>
-                  <div className="account-avatar" style={{ background: 'linear-gradient(135deg,#06D6A0,#059669)' }}>
-                    {a.displayName[0]?.toUpperCase()}
-                  </div>
+                <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
+                  <div className="account-avatar account-avatar--session">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
                     <div className="account-name">{a.displayName}</div>
                     <div className="account-status">{a.statusLabel}</div>
@@ -284,6 +332,27 @@ export function IndexPage() {
                   <span className={`timer-pill ${a.isScheduled ? 'timer-scheduled' : getTimerClass(a.timerDisplay)}`}>
                     {a.timerDisplay}
                   </span>
+                  <span style={{ color: 'var(--c-text-muted)', fontSize: 16 }}>›</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Scheduled (future sessions) */}
+          {scheduled.length > 0 && (
+            <>
+              <div className="group-label" style={{ color: 'var(--c-accent)' }}>⏰ Scheduled</div>
+              {scheduled.map(a => (
+                <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
+                  <div className="account-avatar" style={{ background: 'linear-gradient(135deg,#F59E0B,#D97706)', boxShadow: '0 2px 8px rgba(245,158,11,0.28)' }}>
+                    {a.displayName[0]?.toUpperCase()}
+                  </div>
+                  <div className="account-info">
+                    <div className="account-name">{a.displayName}</div>
+                    <div className="account-status">{a.statusLabel}</div>
+                  </div>
+                  <span className="timer-pill timer-warning">{a.timerDisplay}</span>
+                  <span style={{ color: 'var(--c-text-muted)', fontSize: 16 }}>›</span>
                 </div>
               ))}
             </>
@@ -292,13 +361,10 @@ export function IndexPage() {
           {/* Queued */}
           {queued.length > 0 && (
             <>
-              <div className="divider" />
-              <div className="section-title" style={{ marginBottom: 6, color: '#C4B5FD' }}>In Queue</div>
+              <div className="group-label group-label--queue">⏳ In Queue</div>
               {queued.map(a => (
-                <div className="account-item" key={a.id}>
-                  <div className="account-avatar" style={{ background: 'linear-gradient(135deg,#7B68EE,#4361EE)' }}>
-                    {a.displayName[0]?.toUpperCase()}
-                  </div>
+                <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
+                  <div className="account-avatar account-avatar--queue">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
                     <div className="account-name">{a.displayName}</div>
                     <div className="account-status">{a.statusLabel}</div>
@@ -306,6 +372,7 @@ export function IndexPage() {
                   {a.timerDisplay && (
                     <span className="timer-pill timer-scheduled">{a.timerDisplay}</span>
                   )}
+                  <span style={{ color: 'var(--c-text-muted)', fontSize: 16 }}>›</span>
                 </div>
               ))}
             </>
@@ -313,8 +380,9 @@ export function IndexPage() {
 
           {accounts.length === 0 && (
             <div className="empty-state">
-              <div className="empty-state__icon">👤</div>
-              <div className="empty-state__text">No accounts yet. Add one to get started!</div>
+              <div className="empty-state__icon">🏸</div>
+              <div className="empty-state__title">No players yet</div>
+              <div className="empty-state__text">Add your first player to start managing courts and sessions.</div>
             </div>
           )}
         </div>
@@ -329,16 +397,16 @@ export function IndexPage() {
           </>
         }>
           <div className="input-group">
-            <label className="input-label">Display Name</label>
-            <input className="input" placeholder="e.g. Han" value={addForm.displayName} onChange={e => setAddForm(f => ({ ...f, displayName: e.target.value }))} />
+            <label className="input-label">Display Name <span style={{ fontWeight: 400, textTransform: 'none', opacity: 0.6 }}>(optional)</span></label>
+            <input className="input" placeholder="Defaults to first 2 letters of username" value={addForm.displayName} onChange={e => setAddForm(f => ({ ...f, displayName: e.target.value }))} />
           </div>
           <div className="input-group">
             <label className="input-label">Username</label>
-            <input className="input" placeholder="Login username" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
+            <input className="input" placeholder="Username" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
           </div>
           <div className="input-group">
             <label className="input-label">Password</label>
-            <input className="input" type="password" placeholder="Login password" value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} />
+            <input className="input" type="text" placeholder="Password" value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} />
           </div>
         </Modal>
       )}
@@ -357,28 +425,41 @@ export function IndexPage() {
           </div>
           <div className="input-group">
             <label className="input-label">Password</label>
-            <input className="input" type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} />
+            <input className="input" type="text" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} />
           </div>
         </Modal>
       )}
 
       {/* New court modal */}
       {actionModal === 'new-court' && (
-        <Modal title="Create New Court" onClose={() => setActionModal(null)} actions={
+        <Modal title="🏸 Create New Court" onClose={() => setActionModal(null)} actions={
           <>
             <button className="btn btn-secondary" onClick={() => setActionModal(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={handleCreateCourt}>Create</button>
           </>
         }>
           <div className="input-group">
-            <label className="input-label">Court Name</label>
-            <input className="input" placeholder="e.g. Court 1" value={newCourtName} onChange={e => setNewCourtName(e.target.value)} />
+            <label className="input-label">Court Number</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              <span style={{
+                padding: '11px 12px', background: '#F0F7FF', border: '1.5px solid var(--c-border)',
+                borderRight: 'none', borderRadius: '10px 0 0 10px', color: 'var(--c-text-muted)',
+                fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap',
+              }}>Court</span>
+              <input
+                className="input"
+                style={{ borderRadius: '0 10px 10px 0' }}
+                placeholder="1"
+                value={newCourtName}
+                onChange={e => setNewCourtName(e.target.value)}
+                autoFocus
+              />
+            </div>
           </div>
-          <div className="input-group">
-            <label className="input-label">Start Time (optional — leave blank for now)</label>
-            <input className="input" type="datetime-local" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
+          <TimePicker mode={timeMode} scheduledTime={scheduledTime} onModeChange={setTimeMode} onTimeChange={setScheduledTime} />
+          <div className="text-sm text-muted mt-2">
+            Players: {selected.map(id => accounts.find(a => a.id === id)?.displayName).join(', ')}
           </div>
-          <div className="text-sm text-muted mt-2">Playing: {selected.map(id => accounts.find(a => a.id === id)?.displayName).join(', ')}</div>
         </Modal>
       )}
 
@@ -390,57 +471,93 @@ export function IndexPage() {
             <button className="btn btn-primary" disabled={!targetCourtId} onClick={handleJoinSession}>Join</button>
           </>
         }>
-          <p className="text-sm text-muted mb-2">Select a court to join:</p>
-          {courtsWithSlots.map(c => (
-            <div
-              key={c.id}
-              className="select-item"
-              onClick={() => setTargetCourtId(c.id)}
-              style={{ background: targetCourtId === c.id ? '#EEF2FF' : undefined, padding: '10px 8px', borderRadius: 10 }}
-            >
-              <div className={`checkbox-circle${targetCourtId === c.id ? ' checked' : ''}`}>
-                {targetCourtId === c.id && '✓'}
-              </div>
-              <div>
-                <div className="font-bold">🏸 {c.name}</div>
-                <div className="text-xs text-muted">
-                  {c.current?.accountIds.length}/{c.current?.capacity} players · {c.current!.capacity - c.current!.accountIds.length} slot(s) open
+          <p className="text-sm text-muted mb-2">
+            Adding {selected.length} player{selected.length > 1 ? 's' : ''} — only courts where total becomes 2 or 4:
+          </p>
+          {courtsWithSlots.map(c => {
+            const total = c.current!.accountIds.length + selected.length
+            return (
+              <div key={c.id} className={`select-item${targetCourtId === c.id ? ' selected' : ''}`} onClick={() => setTargetCourtId(c.id)}>
+                <div className={`checkbox-circle${targetCourtId === c.id ? ' checked' : ''}`}>{targetCourtId === c.id && '✓'}</div>
+                <div>
+                  <div className="font-bold">🏸 {c.name}</div>
+                  <div className="text-xs text-muted">
+                    {c.current?.accountIds.length} playing → {total} total
+                  </div>
                 </div>
               </div>
+            )
+          })}
+          {courtsWithSlots.length === 0 && (
+            <div className="empty-state" style={{ padding: 16 }}>
+              <div className="empty-state__title">No valid courts</div>
+              <div className="empty-state__text">No court where adding {selected.length} player{selected.length > 1 ? 's' : ''} gives exactly 2 or 4.</div>
             </div>
-          ))}
+          )}
         </Modal>
       )}
 
       {/* Add to queue modal */}
-      {actionModal === 'add-queue' && (
-        <Modal title="Add to Queue" onClose={() => setActionModal(null)} actions={
-          <>
-            <button className="btn btn-secondary" onClick={() => setActionModal(null)}>Cancel</button>
-            <button className="btn btn-primary" disabled={!targetCourtId} onClick={handleAddQueue}>Queue Up</button>
-          </>
-        }>
-          <p className="text-sm text-muted mb-2">Select court:</p>
-          {courtsWithSession.map(c => (
-            <div
-              key={c.id}
-              className="select-item"
-              onClick={() => setTargetCourtId(c.id)}
-              style={{ background: targetCourtId === c.id ? '#EEF2FF' : undefined, padding: '10px 8px', borderRadius: 10 }}
-            >
-              <div className={`checkbox-circle${targetCourtId === c.id ? ' checked' : ''}`}>
-                {targetCourtId === c.id && '✓'}
+      {actionModal === 'add-queue' && (() => {
+        const activeCourt = courts.find(c => c.id === targetCourtId)
+        const joinableQueues = activeCourt?.queue.filter(s => {
+          const total = s.accountIds.length + selected.length
+          return total === 2 || total === 4
+        }) ?? []
+        return (
+          <Modal title="Add to Queue" onClose={() => setActionModal(null)} actions={
+            <>
+              <button className="btn btn-secondary" onClick={() => setActionModal(null)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!targetCourtId} onClick={handleAddQueue}>
+                {targetQueueId ? 'Join Queue' : 'Queue Up'}
+              </button>
+            </>
+          }>
+            <p className="text-sm text-muted mb-2">Select court:</p>
+            {courtsWithSession.map(c => (
+              <div key={c.id} className={`select-item${targetCourtId === c.id && !targetQueueId ? ' selected' : ''}`}
+                onClick={() => { setTargetCourtId(c.id); setTargetQueueId('') }}>
+                <div className={`checkbox-circle${targetCourtId === c.id && !targetQueueId ? ' checked' : ''}`}>
+                  {targetCourtId === c.id && !targetQueueId && '✓'}
+                </div>
+                <div>
+                  <div className="font-bold">🏸 {c.name}</div>
+                  <div className="text-xs text-muted">{c.queue.length} queue{c.queue.length !== 1 ? 's' : ''} waiting</div>
+                </div>
               </div>
-              <div className="font-bold">🏸 {c.name}</div>
-            </div>
-          ))}
-          <div className="input-group mt-3">
-            <label className="input-label">Scheduled Start (optional)</label>
-            <input className="input" type="datetime-local" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
-          </div>
-        </Modal>
-      )}
-    </div>
+            ))}
+
+            {joinableQueues.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div className="group-label" style={{ color: 'var(--c-primary)', marginBottom: 6 }}>Or join existing queue</div>
+                {joinableQueues.map(s => {
+                  const isSelected = targetQueueId === s.id
+                  const qIdx = activeCourt!.queue.indexOf(s) + 1
+                  const names = s.accountIds.map(aid => accounts.find(a => a.id === aid)?.displayName).filter(Boolean).join(', ')
+                  const total = s.accountIds.length + selected.length
+                  return (
+                    <div key={s.id} className={`select-item${isSelected ? ' selected' : ''}`}
+                      onClick={() => { setTargetCourtId(activeCourt!.id); setTargetQueueId(isSelected ? '' : s.id) }}>
+                      <div className={`checkbox-circle${isSelected ? ' checked' : ''}`}>{isSelected && '✓'}</div>
+                      <div>
+                        <div className="font-bold text-sm">Queue {qIdx} · {names}</div>
+                        <div className="text-xs text-muted">{s.accountIds.length} → {total} players</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {!targetQueueId && (
+              <div style={{ marginTop: 14 }}>
+                <TimePicker mode={timeMode} scheduledTime={scheduledTime} onModeChange={setTimeMode} onTimeChange={setScheduledTime} nowLabel="Up Next" />
+              </div>
+            )}
+          </Modal>
+        )
+      })()}
+    </>
   )
 }
 

@@ -36,15 +36,18 @@ interface AppStore {
   deleteCourt: (courtId: string) => void
 
   // Session actions
-  startSession: (courtId: string, accountIds: string[], startTime?: number) => void
+  startSession: (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
   endSession: (courtId: string) => void
   replacePlayerInSession: (courtId: string, oldAccountId: string, newAccountId: string) => void
+  removePlayerFromSession: (courtId: string, accountId: string) => void
   joinSession: (courtId: string, accountIds: string[]) => void
 
   // Queue actions
-  addToQueue: (courtId: string, accountIds: string[], startTime?: number) => void
+  addToQueue: (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
   removeQueue: (courtId: string, sessionId: string) => void
   joinQueue: (courtId: string, sessionId: string, accountIds: string[]) => void
+  replacePlayerInQueue: (courtId: string, sessionId: string, oldAccountId: string, newAccountId: string) => void
+  removePlayerFromQueue: (courtId: string, sessionId: string, accountId: string) => void
   promoteQueue: (courtId: string) => void
 
   // Tick — call on interval to auto-promote expired sessions
@@ -113,11 +116,11 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ courts })
   },
 
-  startSession(courtId, accountIds, startTime) {
+  startSession(courtId, accountIds, capacity, startTime) {
     const session: Session = {
       id: generateId(),
       accountIds,
-      capacity: accountIds.length,
+      capacity,
       startTime: startTime ?? Date.now(),
     }
     const courts = get().courts.map(c =>
@@ -150,21 +153,42 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ courts })
   },
 
+  removePlayerFromSession(courtId, accountId) {
+    const courts = get().courts.map(c => {
+      if (c.id !== courtId || !c.current) return c
+      const accountIds = c.current.accountIds.filter(id => id !== accountId)
+      if (accountIds.length === 0) {
+        if (c.queue.length > 0) {
+          const [next, ...rest] = c.queue
+          return { ...c, current: { ...next, startTime: Date.now() }, queue: rest }
+        }
+        return { ...c, current: null }
+      }
+      const newCapacity = (accountIds.length <= 2 ? 2 : 4) as 2 | 4
+      return { ...c, current: { ...c.current, accountIds, capacity: newCapacity } }
+    })
+    save(STORAGE_COURTS, courts)
+    set({ courts })
+  },
+
   joinSession(courtId, accountIds) {
     const courts = get().courts.map(c => {
       if (c.id !== courtId || !c.current) return c
-      const updated = { ...c.current, accountIds: [...c.current.accountIds, ...accountIds] }
+      const newIds = [...c.current.accountIds, ...accountIds]
+      // Expand capacity to fit the new total (capped at 4)
+      const newCapacity = Math.min(4, Math.max(c.current.capacity, newIds.length)) as 2 | 4
+      const updated = { ...c.current, accountIds: newIds, capacity: newCapacity }
       return { ...c, current: updated }
     })
     save(STORAGE_COURTS, courts)
     set({ courts })
   },
 
-  addToQueue(courtId, accountIds, startTime) {
+  addToQueue(courtId, accountIds, capacity, startTime) {
     const session: Session = {
       id: generateId(),
       accountIds,
-      capacity: accountIds.length,
+      capacity,
       startTime: startTime ?? 0,
     }
     const courts = get().courts.map(c =>
@@ -182,12 +206,42 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ courts })
   },
 
+  removePlayerFromQueue(courtId, sessionId, accountId) {
+    const courts = get().courts.map(c => {
+      if (c.id !== courtId) return c
+      const queue = c.queue.map(s => {
+        if (s.id !== sessionId) return s
+        const accountIds = s.accountIds.filter(id => id !== accountId)
+        if (accountIds.length === 0) return null
+        return { ...s, accountIds, capacity: (accountIds.length <= 2 ? 2 : 4) as 2 | 4 }
+      }).filter((s): s is Session => s !== null)
+      return { ...c, queue }
+    })
+    save(STORAGE_COURTS, courts)
+    set({ courts })
+  },
+
   joinQueue(courtId, sessionId, accountIds) {
     const courts = get().courts.map(c => {
       if (c.id !== courtId) return c
-      const queue = c.queue.map(s =>
-        s.id === sessionId ? { ...s, accountIds: [...s.accountIds, ...accountIds] } : s
-      )
+      const queue = c.queue.map(s => {
+        if (s.id !== sessionId) return s
+        const newIds = [...s.accountIds, ...accountIds]
+        return { ...s, accountIds: newIds, capacity: (newIds.length <= 2 ? 2 : 4) as 2 | 4 }
+      })
+      return { ...c, queue }
+    })
+    save(STORAGE_COURTS, courts)
+    set({ courts })
+  },
+
+  replacePlayerInQueue(courtId, sessionId, oldAccountId, newAccountId) {
+    const courts = get().courts.map(c => {
+      if (c.id !== courtId) return c
+      const queue = c.queue.map(s => {
+        if (s.id !== sessionId) return s
+        return { ...s, accountIds: s.accountIds.map(id => id === oldAccountId ? newAccountId : id) }
+      })
       return { ...c, queue }
     })
     save(STORAGE_COURTS, courts)

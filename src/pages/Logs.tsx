@@ -7,7 +7,7 @@ export function LogsPage() {
   const { logs } = useStore()
 
   return (
-    <div className="app-shell">
+    <>
       <div className="nav-bar">
         <button className="nav-bar__back" onClick={() => navigate('/')}>←</button>
         <span className="nav-bar__title">Launch Logs</span>
@@ -29,6 +29,6 @@ export function LogsPage() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

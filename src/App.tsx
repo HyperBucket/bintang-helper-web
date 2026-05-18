@@ -20,18 +20,22 @@ function AppInner() {
   }, [tick])
 
   return (
-    <Routes>
-      <Route path="/" element={<IndexPage />} />
-      <Route path="/courts" element={<CourtsPage />} />
-      <Route path="/court/:id" element={<CourtPage />} />
-      <Route path="/logs" element={<LogsPage />} />
-    </Routes>
+    <div className="app-shell">
+      <Routes>
+        <Route path="/" element={<IndexPage />} />
+        <Route path="/courts" element={<CourtsPage />} />
+        <Route path="/court/:id" element={<CourtPage />} />
+        <Route path="/logs" element={<LogsPage />} />
+      </Routes>
+      {/* Modal portal root — scoped inside the app shell */}
+      <div id="modal-root" />
+    </div>
   )
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AppInner />
     </BrowserRouter>
   )
