@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import type { Account, Court, Session } from '../types'
 import { generateId, SESSION_DURATION } from '../utils'
+import { supabase } from '../lib/supabase'
 
-const STORAGE_ACCOUNTS = 'bintang_v3_accounts'
-const STORAGE_COURTS = 'bintang_v3_courts'
 const STORAGE_MY_IDS = 'bintang_my_ids'
-const STORAGE_LOGS = 'bintang_logs'
+const STORAGE_LOGS   = 'bintang_logs'
+const CLUB_ROW_ID    = 'default'
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -16,8 +16,23 @@ function load<T>(key: string, fallback: T): T {
   }
 }
 
-function save<T>(key: string, value: T) {
+function saveLocal<T>(key: string, value: T) {
   localStorage.setItem(key, JSON.stringify(value))
+}
+
+// Debounced cloud write — avoids hammering Supabase on rapid changes
+let cloudTimer: ReturnType<typeof setTimeout> | null = null
+let applyingRemote = false
+
+function scheduleCloudSync(accounts: Account[], courts: Court[]) {
+  if (applyingRemote) return
+  if (cloudTimer) clearTimeout(cloudTimer)
+  cloudTimer = setTimeout(() => {
+    supabase
+      .from('club_data')
+      .upsert({ id: CLUB_ROW_ID, accounts, courts, updated_at: new Date().toISOString() })
+      .then(() => {})
+  }, 400)
 }
 
 interface AppStore {
@@ -25,24 +40,21 @@ interface AppStore {
   courts: Court[]
   myIds: string[]
   logs: number[]
+  synced: boolean   // true once first Supabase load completes
 
-  // Account actions
   addAccount: (displayName: string, username: string, password: string) => void
   updateAccount: (id: string, username: string, password: string) => void
   deleteAccount: (id: string) => void
 
-  // Court actions
   addCourt: (name: string) => Court
   deleteCourt: (courtId: string) => void
 
-  // Session actions
   startSession: (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
   endSession: (courtId: string) => void
   replacePlayerInSession: (courtId: string, oldAccountId: string, newAccountId: string) => void
   removePlayerFromSession: (courtId: string, accountId: string) => void
   joinSession: (courtId: string, accountIds: string[]) => void
 
-  // Queue actions
   addToQueue: (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
   removeQueue: (courtId: string, sessionId: string) => void
   joinQueue: (courtId: string, sessionId: string, accountIds: string[]) => void
@@ -50,10 +62,7 @@ interface AppStore {
   removePlayerFromQueue: (courtId: string, sessionId: string, accountId: string) => void
   promoteQueue: (courtId: string) => void
 
-  // Tick — call on interval to auto-promote expired sessions
   tick: () => void
-
-  // Hydrate from localStorage
   hydrate: () => void
   addLog: () => void
 }
@@ -63,71 +72,100 @@ export const useStore = create<AppStore>((set, get) => ({
   courts: [],
   myIds: [],
   logs: [],
+  synced: false,
 
+  // ── Hydrate ──────────────────────────────────────────────
   hydrate() {
+    // 1. Load myIds / logs from localStorage (always local)
     set({
-      accounts: load<Account[]>(STORAGE_ACCOUNTS, []),
-      courts: load<Court[]>(STORAGE_COURTS, []),
       myIds: load<string[]>(STORAGE_MY_IDS, []),
-      logs: load<number[]>(STORAGE_LOGS, []),
+      logs:  load<number[]>(STORAGE_LOGS, []),
     })
+
+    // 2. Fetch latest data from Supabase
+    supabase
+      .from('club_data')
+      .select('accounts, courts')
+      .eq('id', CLUB_ROW_ID)
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          const accounts = (data.accounts as Account[]) ?? []
+          const courts   = (data.courts   as Court[])   ?? []
+          set({ accounts, courts, synced: true })
+        } else {
+          set({ synced: true })
+        }
+      })
+
+    // 3. Real-time subscription — apply remote changes to all open tabs/devices
+    supabase
+      .channel('club_sync')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'club_data', filter: `id=eq.${CLUB_ROW_ID}` },
+        (payload) => {
+          const { accounts, courts } = payload.new as { accounts: Account[]; courts: Court[] }
+          applyingRemote = true
+          set({ accounts, courts })
+          setTimeout(() => { applyingRemote = false }, 100)
+        }
+      )
+      .subscribe()
   },
 
+  // ── Logs ────────────────────────────────────────────────
   addLog() {
     const logs = [Date.now(), ...get().logs]
-    save(STORAGE_LOGS, logs)
+    saveLocal(STORAGE_LOGS, logs)
     set({ logs })
   },
 
+  // ── Accounts ─────────────────────────────────────────────
   addAccount(displayName, username, password) {
     const account: Account = { id: generateId(), displayName, username, password }
     const accounts = [...get().accounts, account]
     const myIds = [...get().myIds, account.id]
-    save(STORAGE_ACCOUNTS, accounts)
-    save(STORAGE_MY_IDS, myIds)
+    saveLocal(STORAGE_MY_IDS, myIds)
     set({ accounts, myIds })
+    scheduleCloudSync(accounts, get().courts)
   },
 
   updateAccount(id, username, password) {
     const accounts = get().accounts.map(a => a.id === id ? { ...a, username, password } : a)
-    save(STORAGE_ACCOUNTS, accounts)
     set({ accounts })
+    scheduleCloudSync(accounts, get().courts)
   },
 
   deleteAccount(id) {
     const accounts = get().accounts.filter(a => a.id !== id)
     const myIds = get().myIds.filter(mid => mid !== id)
-    save(STORAGE_ACCOUNTS, accounts)
-    save(STORAGE_MY_IDS, myIds)
+    saveLocal(STORAGE_MY_IDS, myIds)
     set({ accounts, myIds })
+    scheduleCloudSync(accounts, get().courts)
   },
 
+  // ── Courts ───────────────────────────────────────────────
   addCourt(name) {
     const court: Court = { id: generateId(), name, current: null, queue: [] }
     const courts = [...get().courts, court]
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
     return court
   },
 
   deleteCourt(courtId) {
     const courts = get().courts.filter(c => c.id !== courtId)
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
+  // ── Sessions ─────────────────────────────────────────────
   startSession(courtId, accountIds, capacity, startTime) {
-    const session: Session = {
-      id: generateId(),
-      accountIds,
-      capacity,
-      startTime: startTime ?? Date.now(),
-    }
-    const courts = get().courts.map(c =>
-      c.id === courtId ? { ...c, current: session } : c
-    )
-    save(STORAGE_COURTS, courts)
+    const session: Session = { id: generateId(), accountIds, capacity, startTime: startTime ?? Date.now() }
+    const courts = get().courts.map(c => c.id === courtId ? { ...c, current: session } : c)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   endSession(courtId) {
@@ -139,8 +177,8 @@ export const useStore = create<AppStore>((set, get) => ({
       }
       return { ...c, current: null }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   replacePlayerInSession(courtId, oldAccountId, newAccountId) {
@@ -149,8 +187,8 @@ export const useStore = create<AppStore>((set, get) => ({
       const accountIds = c.current.accountIds.map(id => id === oldAccountId ? newAccountId : id)
       return { ...c, current: { ...c.current, accountIds } }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   removePlayerFromSession(courtId, accountId) {
@@ -167,43 +205,62 @@ export const useStore = create<AppStore>((set, get) => ({
       const newCapacity = (accountIds.length <= 2 ? 2 : 4) as 2 | 4
       return { ...c, current: { ...c.current, accountIds, capacity: newCapacity } }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   joinSession(courtId, accountIds) {
     const courts = get().courts.map(c => {
       if (c.id !== courtId || !c.current) return c
       const newIds = [...c.current.accountIds, ...accountIds]
-      // Expand capacity to fit the new total (capped at 4)
       const newCapacity = Math.min(4, Math.max(c.current.capacity, newIds.length)) as 2 | 4
-      const updated = { ...c.current, accountIds: newIds, capacity: newCapacity }
-      return { ...c, current: updated }
+      return { ...c, current: { ...c.current, accountIds: newIds, capacity: newCapacity } }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
+  // ── Queue ─────────────────────────────────────────────────
   addToQueue(courtId, accountIds, capacity, startTime) {
-    const session: Session = {
-      id: generateId(),
-      accountIds,
-      capacity,
-      startTime: startTime ?? 0,
-    }
-    const courts = get().courts.map(c =>
-      c.id === courtId ? { ...c, queue: [...c.queue, session] } : c
-    )
-    save(STORAGE_COURTS, courts)
+    const session: Session = { id: generateId(), accountIds, capacity, startTime: startTime ?? 0 }
+    const courts = get().courts.map(c => c.id === courtId ? { ...c, queue: [...c.queue, session] } : c)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   removeQueue(courtId, sessionId) {
     const courts = get().courts.map(c =>
       c.id === courtId ? { ...c, queue: c.queue.filter(s => s.id !== sessionId) } : c
     )
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
+  },
+
+  joinQueue(courtId, sessionId, accountIds) {
+    const courts = get().courts.map(c => {
+      if (c.id !== courtId) return c
+      const queue = c.queue.map(s => {
+        if (s.id !== sessionId) return s
+        const newIds = [...s.accountIds, ...accountIds]
+        return { ...s, accountIds: newIds, capacity: (newIds.length <= 2 ? 2 : 4) as 2 | 4 }
+      })
+      return { ...c, queue }
+    })
+    set({ courts })
+    scheduleCloudSync(get().accounts, courts)
+  },
+
+  replacePlayerInQueue(courtId, sessionId, oldAccountId, newAccountId) {
+    const courts = get().courts.map(c => {
+      if (c.id !== courtId) return c
+      const queue = c.queue.map(s => {
+        if (s.id !== sessionId) return s
+        return { ...s, accountIds: s.accountIds.map(id => id === oldAccountId ? newAccountId : id) }
+      })
+      return { ...c, queue }
+    })
+    set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   removePlayerFromQueue(courtId, sessionId, accountId) {
@@ -217,35 +274,8 @@ export const useStore = create<AppStore>((set, get) => ({
       }).filter((s): s is Session => s !== null)
       return { ...c, queue }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
-  },
-
-  joinQueue(courtId, sessionId, accountIds) {
-    const courts = get().courts.map(c => {
-      if (c.id !== courtId) return c
-      const queue = c.queue.map(s => {
-        if (s.id !== sessionId) return s
-        const newIds = [...s.accountIds, ...accountIds]
-        return { ...s, accountIds: newIds, capacity: (newIds.length <= 2 ? 2 : 4) as 2 | 4 }
-      })
-      return { ...c, queue }
-    })
-    save(STORAGE_COURTS, courts)
-    set({ courts })
-  },
-
-  replacePlayerInQueue(courtId, sessionId, oldAccountId, newAccountId) {
-    const courts = get().courts.map(c => {
-      if (c.id !== courtId) return c
-      const queue = c.queue.map(s => {
-        if (s.id !== sessionId) return s
-        return { ...s, accountIds: s.accountIds.map(id => id === oldAccountId ? newAccountId : id) }
-      })
-      return { ...c, queue }
-    })
-    save(STORAGE_COURTS, courts)
-    set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
   promoteQueue(courtId) {
@@ -254,10 +284,11 @@ export const useStore = create<AppStore>((set, get) => ({
       const [next, ...rest] = c.queue
       return { ...c, current: { ...next, startTime: Date.now() }, queue: rest }
     })
-    save(STORAGE_COURTS, courts)
     set({ courts })
+    scheduleCloudSync(get().accounts, courts)
   },
 
+  // ── Tick ──────────────────────────────────────────────────
   tick() {
     const now = Date.now()
     let changed = false
@@ -265,7 +296,6 @@ export const useStore = create<AppStore>((set, get) => ({
       if (!c.current) return c
       const expiry = c.current.startTime + SESSION_DURATION
       if (now < expiry) return c
-      // Session expired — promote or clear
       changed = true
       if (navigator.vibrate) navigator.vibrate(400)
       if (c.queue.length > 0) {
@@ -275,8 +305,8 @@ export const useStore = create<AppStore>((set, get) => ({
       return { ...c, current: null }
     })
     if (changed) {
-      save(STORAGE_COURTS, courts)
       set({ courts })
+      scheduleCloudSync(get().accounts, courts)
     }
   },
 }))

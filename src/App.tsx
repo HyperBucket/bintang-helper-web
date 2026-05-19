@@ -7,7 +7,7 @@ import { CourtPage } from './pages/Court'
 import { LogsPage } from './pages/Logs'
 
 function AppInner() {
-  const { hydrate, addLog, tick } = useStore()
+  const { hydrate, addLog, tick, synced } = useStore()
 
   useEffect(() => {
     hydrate()
@@ -21,13 +21,22 @@ function AppInner() {
 
   return (
     <div className="app-shell">
+      {!synced && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 999,
+          background: 'var(--c-bg)', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 12,
+        }}>
+          <div style={{ fontSize: 36 }}>🏸</div>
+          <div style={{ fontSize: 14, color: 'var(--c-text-muted)', fontWeight: 600 }}>Syncing…</div>
+        </div>
+      )}
       <Routes>
         <Route path="/" element={<IndexPage />} />
         <Route path="/courts" element={<CourtsPage />} />
         <Route path="/court/:id" element={<CourtPage />} />
         <Route path="/logs" element={<LogsPage />} />
       </Routes>
-      {/* Modal portal root — scoped inside the app shell */}
       <div id="modal-root" />
     </div>
   )
