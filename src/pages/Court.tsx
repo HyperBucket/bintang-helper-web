@@ -200,7 +200,7 @@ export function CourtPage() {
                       <div className="account-avatar">{a.displayName[0]?.toUpperCase()}</div>
                       <div className="account-info">
                         <div className="account-name">{a.displayName}</div>
-                        <div className="account-status">{a.username}</div>
+                        <div className="account-status">{a.username} · {a.password}</div>
                       </div>
                       <button className="btn btn-secondary btn-xs" onClick={() => openPickModal({ type: 'replace', oldId: aid })}>
                         Replace
@@ -293,7 +293,7 @@ export function CourtPage() {
                           </div>
                           <div className="account-info">
                             <div className="account-name" style={{ fontSize: 13 }}>{a.displayName}</div>
-                            <div className="account-status">{a.username}</div>
+                            <div className="account-status">{a.username} · {a.password}</div>
                           </div>
                           <button className="btn btn-secondary btn-xs" onClick={() => openPickModal({ type: 'replace-queue-player', sessionId: session.id, oldId: aid })}>
                             Replace
