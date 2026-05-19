@@ -213,7 +213,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const courts = get().courts.map(c => {
       if (c.id !== courtId || !c.current) return c
       const newIds = [...c.current.accountIds, ...accountIds]
-      const newCapacity = Math.min(4, Math.max(c.current.capacity, newIds.length)) as 2 | 4
+      const newCapacity = (newIds.length <= 2 ? 2 : 4) as 2 | 4
       return { ...c, current: { ...c.current, accountIds: newIds, capacity: newCapacity } }
     })
     set({ courts })
