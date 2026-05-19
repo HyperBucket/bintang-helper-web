@@ -327,7 +327,8 @@ export function IndexPage() {
                   <div className="account-avatar account-avatar--session">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
                     <div className="account-name">{a.displayName}</div>
-                    <div className="account-status">{a.statusLabel}</div>
+                    <div className="account-status">{a.username} · {a.password}</div>
+                    <div className="account-status">{a.courtName}</div>
                   </div>
                   <span className={`timer-pill ${a.isScheduled ? 'timer-scheduled' : getTimerClass(a.timerDisplay)}`}>
                     {a.timerDisplay}
@@ -349,7 +350,8 @@ export function IndexPage() {
                   </div>
                   <div className="account-info">
                     <div className="account-name">{a.displayName}</div>
-                    <div className="account-status">{a.statusLabel}</div>
+                    <div className="account-status">{a.username} · {a.password}</div>
+                    <div className="account-status">{a.courtName}</div>
                   </div>
                   <span className="timer-pill timer-warning">{a.timerDisplay}</span>
                   <span style={{ color: 'var(--c-text-muted)', fontSize: 16 }}>›</span>
@@ -367,7 +369,8 @@ export function IndexPage() {
                   <div className="account-avatar account-avatar--queue">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
                     <div className="account-name">{a.displayName}</div>
-                    <div className="account-status">{a.statusLabel}</div>
+                    <div className="account-status">{a.username} · {a.password}</div>
+                    <div className="account-status">{a.courtName}</div>
                   </div>
                   {a.timerDisplay && (
                     <span className="timer-pill timer-scheduled">{a.timerDisplay}</span>
