@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>
+    // Encode the current path into a query param and redirect to index
+    var base = '/bintang-helper-web/';
+    var path = window.location.pathname.replace(base, '') + window.location.search + window.location.hash;
+    window.location.replace(base + '?r=' + encodeURIComponent(path));
+  </script>
+</head>
+<body></body>
+</html>

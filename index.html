@@ -4,7 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>bintang-helper-web</title>
+    <title>Bintang Helper</title>
+    <script>
+      // Restore path encoded by 404.html
+      (function () {
+        var r = new URLSearchParams(window.location.search).get('r');
+        if (r) {
+          window.history.replaceState(null, '', '/bintang-helper-web/' + r);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
