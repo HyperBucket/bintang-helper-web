@@ -102,7 +102,7 @@ export function IndexPage() {
 
   // Edit account modal
   const [editTarget, setEditTarget] = useState<Account | null>(null)
-  const [editForm, setEditForm] = useState({ username: '', password: '' })
+  const [editForm, setEditForm] = useState({ displayName: '', username: '', password: '' })
 
   // Court action modal: 'new-court' | 'join-session' | 'add-queue'
   const [actionModal, setActionModal] = useState<'new-court' | 'join-session' | 'add-queue' | null>(null)
@@ -158,12 +158,12 @@ export function IndexPage() {
 
   const openEdit = (a: Account) => {
     setEditTarget(a)
-    setEditForm({ username: a.username, password: a.password })
+    setEditForm({ displayName: a.displayName, username: a.username, password: a.password })
   }
 
   const handleEdit = () => {
     if (!editTarget) return
-    updateAccount(editTarget.id, editForm.username, editForm.password)
+    updateAccount(editTarget.id, editForm.displayName || editForm.username.slice(0, 2).toUpperCase(), editForm.username, editForm.password)
     setEditTarget(null)
   }
 
@@ -421,6 +421,10 @@ export function IndexPage() {
             <button className="btn btn-primary" onClick={handleEdit}>Save</button>
           </>
         }>
+          <div className="input-group">
+            <label className="input-label">Display Name</label>
+            <input className="input" value={editForm.displayName} onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))} placeholder="Leave blank to auto-generate" />
+          </div>
           <div className="input-group">
             <label className="input-label">Username</label>
             <input className="input" value={editForm.username} onChange={e => setEditForm(f => ({ ...f, username: e.target.value }))} />

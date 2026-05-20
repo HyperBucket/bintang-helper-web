@@ -43,7 +43,7 @@ interface AppStore {
   synced: boolean   // true once first Supabase load completes
 
   addAccount: (displayName: string, username: string, password: string) => void
-  updateAccount: (id: string, username: string, password: string) => void
+  updateAccount: (id: string, displayName: string, username: string, password: string) => void
   deleteAccount: (id: string) => void
 
   addCourt: (name: string) => Court
@@ -131,8 +131,8 @@ export const useStore = create<AppStore>((set, get) => ({
     scheduleCloudSync(accounts, get().courts)
   },
 
-  updateAccount(id, username, password) {
-    const accounts = get().accounts.map(a => a.id === id ? { ...a, username, password } : a)
+  updateAccount(id, displayName, username, password) {
+    const accounts = get().accounts.map(a => a.id === id ? { ...a, displayName, username, password } : a)
     set({ accounts })
     scheduleCloudSync(accounts, get().courts)
   },
