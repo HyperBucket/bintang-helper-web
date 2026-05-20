@@ -51,7 +51,7 @@ function getDisplayAccounts(
           ? `Starts in ${formatCountdown(startsIn)}`
           : formatCountdown(remaining),
         isScheduled: isFuture,
-        canEdit: myIds.includes(a.id),
+        canEdit: true,
         selectable: false,
         selected: false,
       }
@@ -69,7 +69,7 @@ function getDisplayAccounts(
         statusLabel: qLabel,
         timerDisplay: isScheduled ? `Starts in ${formatCountdown(startsIn)}` : '',
         isScheduled,
-        canEdit: myIds.includes(a.id),
+        canEdit: true,
         selectable: false,
         selected: false,
       }
@@ -83,7 +83,7 @@ function getDisplayAccounts(
       statusLabel: 'Available',
       timerDisplay: '',
       isScheduled: false,
-      canEdit: myIds.includes(a.id),
+      canEdit: true,
       selectable: selectMode,
       selected: selected.includes(a.id),
     }
