@@ -246,7 +246,7 @@ export function IndexPage() {
         <div className="hero-banner">
           <div>
             <div className="hero-banner__label">Player Pool</div>
-            <div className="hero-banner__value">{accounts.length} Players</div>
+            <div className="hero-banner__value">{accounts.filter(a => !!a.password).length} Players</div>
             <div className="hero-banner__sub">
               {inSession.length} playing · {scheduled.length} scheduled · {queued.length} queued
             </div>
