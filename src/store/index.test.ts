@@ -86,7 +86,7 @@ describe('updateAccount', () => {
   it('updates username and password by id', () => {
     const acct = makeAccount({ id: 'id1' })
     useStore.setState({ accounts: [acct] })
-    useStore.getState().updateAccount('id1', 'newuser', 'newpass')
+    useStore.getState().updateAccount('id1', 'NU', 'newuser', 'newpass')
     const updated = useStore.getState().accounts[0]
     expect(updated.username).toBe('newuser')
     expect(updated.password).toBe('newpass')
@@ -96,7 +96,7 @@ describe('updateAccount', () => {
     const a1 = makeAccount({ id: 'id1' })
     const a2 = makeAccount({ id: 'id2', username: 'original' })
     useStore.setState({ accounts: [a1, a2] })
-    useStore.getState().updateAccount('id1', 'changed', 'pw')
+    useStore.getState().updateAccount('id1', 'CH', 'changed', 'pw')
     expect(useStore.getState().accounts[1].username).toBe('original')
   })
 })
