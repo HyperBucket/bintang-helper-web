@@ -331,9 +331,9 @@ export function IndexPage() {
                 {pastOpen ? '▾' : '▸'} Past Accounts ({past.length})
               </div>
               {pastOpen && past.map(a => (
-                <div className="account-item" key={a.id} style={{ opacity: 0.6 }}>
-                  <div className="account-avatar" style={{ background: 'var(--c-border)' }}>{a.displayName[0]?.toUpperCase()}</div>
-                  <div className="account-info">
+                <div className="account-item" key={a.id}>
+                  <div className="account-avatar" style={{ background: 'var(--c-border)', opacity: 0.6 }}>{a.displayName[0]?.toUpperCase()}</div>
+                  <div className="account-info" style={{ opacity: 0.6 }}>
                     <div className="account-name">{a.displayName}</div>
                     <div className="account-status">{a.username} · <em>no password</em></div>
                   </div>
