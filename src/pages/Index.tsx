@@ -135,7 +135,7 @@ export function IndexPage() {
   const displayAccounts = getDisplayAccounts(accounts, courts, selected, selectMode, now)
   const unused = displayAccounts.filter(a => a.status === 'unused')
   const active = unused.filter(a => !!a.password)
-  const past = unused.filter(a => !a.password)
+  const past = unused.filter(a => !a.password).sort((a, b) => a.displayName.localeCompare(b.displayName))
   const inSession = displayAccounts.filter(a => a.status === 'in_session')
   const scheduled = displayAccounts.filter(a => a.status === 'scheduled')
   const queued = displayAccounts.filter(a => a.status === 'queued')
