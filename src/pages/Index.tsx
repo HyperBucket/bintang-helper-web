@@ -9,7 +9,6 @@ import { formatCountdown, SESSION_DURATION } from '../utils'
 function getDisplayAccounts(
   accounts: Account[],
   courts: Court[],
-  myIds: string[],
   selected: string[],
   selectMode: boolean,
   now: number
@@ -92,7 +91,7 @@ function getDisplayAccounts(
 
 export function IndexPage() {
   const navigate = useNavigate()
-  const { accounts, courts, myIds, addAccount, updateAccount, deleteAccount, addCourt, startSession } = useStore()
+  const { accounts, courts, addAccount, updateAccount, deleteAccount, addCourt, startSession } = useStore()
 
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
@@ -132,7 +131,7 @@ export function IndexPage() {
     return () => clearInterval(id)
   }, [])
 
-  const displayAccounts = getDisplayAccounts(accounts, courts, myIds, selected, selectMode, now)
+  const displayAccounts = getDisplayAccounts(accounts, courts, selected, selectMode, now)
   const unused = displayAccounts.filter(a => a.status === 'unused')
   const inSession = displayAccounts.filter(a => a.status === 'in_session')
   const scheduled = displayAccounts.filter(a => a.status === 'scheduled')
