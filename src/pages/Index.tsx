@@ -83,7 +83,7 @@ function getDisplayAccounts(
       timerDisplay: '',
       isScheduled: false,
       canEdit: true,
-      selectable: selectMode,
+      selectable: selectMode && !!a.password,
       selected: selected.includes(a.id),
     }
   })
@@ -95,6 +95,7 @@ export function IndexPage() {
 
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+  const [pastOpen, setPastOpen] = useState(false)
 
   // Add account modal
   const [showAdd, setShowAdd] = useState(false)
@@ -133,6 +134,8 @@ export function IndexPage() {
 
   const displayAccounts = getDisplayAccounts(accounts, courts, selected, selectMode, now)
   const unused = displayAccounts.filter(a => a.status === 'unused')
+  const active = unused.filter(a => !!a.password)
+  const past = unused.filter(a => !a.password)
   const inSession = displayAccounts.filter(a => a.status === 'in_session')
   const scheduled = displayAccounts.filter(a => a.status === 'scheduled')
   const queued = displayAccounts.filter(a => a.status === 'queued')
@@ -285,8 +288,8 @@ export function IndexPage() {
             </div>
           )}
 
-          {/* Unused accounts */}
-          {unused.length > 0 && (
+          {/* Active accounts (have password) */}
+          {active.length > 0 && (
             <>
               <div className="group-label group-label--available">
                 ✓ Available
@@ -294,19 +297,47 @@ export function IndexPage() {
                   <button className="btn btn-secondary btn-xs" style={{ marginLeft: 'auto' }} onClick={() => setSelectMode(true)}>Select</button>
                 )}
               </div>
-              {unused.map(a => (
+              {active.map(a => (
                 <div className="account-item" key={a.id}>
-                  {selectMode && (
+                  {selectMode && a.selectable && (
                     <div className={`checkbox-circle${a.selected ? ' checked' : ''}`} onClick={() => toggleSelect(a.id)}>
                       {a.selected && '✓'}
                     </div>
                   )}
                   <div className="account-avatar">{a.displayName[0]?.toUpperCase()}</div>
-                  <div className="account-info" onClick={selectMode ? () => toggleSelect(a.id) : undefined} style={selectMode ? { cursor: 'pointer' } : {}}>
+                  <div className="account-info" onClick={selectMode && a.selectable ? () => toggleSelect(a.id) : undefined} style={selectMode && a.selectable ? { cursor: 'pointer' } : {}}>
                     <div className="account-name">{a.displayName}</div>
                     <div className="account-status">{a.username} · {a.password}</div>
                   </div>
                   {!selectMode && a.canEdit && (
+                    <div className="account-actions">
+                      <button className="btn btn-ghost btn-xs" onClick={() => openEdit(a)}>Edit</button>
+                      <button className="btn btn-danger btn-xs" onClick={() => handleDelete(a.id)}>Del</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Past accounts (no password) */}
+          {past.length > 0 && (
+            <>
+              <div
+                className="group-label"
+                style={{ color: 'var(--c-text-muted)', cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => setPastOpen(o => !o)}
+              >
+                {pastOpen ? '▾' : '▸'} Past Accounts ({past.length})
+              </div>
+              {pastOpen && past.map(a => (
+                <div className="account-item" key={a.id} style={{ opacity: 0.6 }}>
+                  <div className="account-avatar" style={{ background: 'var(--c-border)' }}>{a.displayName[0]?.toUpperCase()}</div>
+                  <div className="account-info">
+                    <div className="account-name">{a.displayName}</div>
+                    <div className="account-status">{a.username} · <em>no password</em></div>
+                  </div>
+                  {a.canEdit && (
                     <div className="account-actions">
                       <button className="btn btn-ghost btn-xs" onClick={() => openEdit(a)}>Edit</button>
                       <button className="btn btn-danger btn-xs" onClick={() => handleDelete(a.id)}>Del</button>

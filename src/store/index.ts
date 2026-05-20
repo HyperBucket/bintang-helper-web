@@ -99,6 +99,10 @@ export const useStore = create<AppStore>((set, get) => ({
       })
 
     // 3. Real-time subscription — apply remote changes to all open tabs/devices
+    // Remove existing channel first (React StrictMode calls hydrate twice in dev)
+    const existing = supabase.getChannels().find(c => c.topic === 'realtime:club_sync')
+    if (existing) supabase.removeChannel(existing)
+
     supabase
       .channel('club_sync')
       .on(
