@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 interface ModalProps {
@@ -11,6 +11,7 @@ interface ModalProps {
 export function Modal({ title, children, actions, onClose }: ModalProps) {
   const [vvHeight, setVvHeight] = useState<number | null>(null)
   const [vvBottom, setVvBottom] = useState(0)
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -36,6 +37,26 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
     }
   }, [])
 
+  // Lock background scroll on iOS. position:fixed is the only reliable way
+  // to stop rubber-band / momentum scrolling on the page behind the modal.
+  useEffect(() => {
+    const scrollY = window.scrollY
+    const body = document.body
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.left = '0'
+    body.style.right = '0'
+    body.style.overflow = 'hidden'
+    return () => {
+      body.style.position = ''
+      body.style.top = ''
+      body.style.left = ''
+      body.style.right = ''
+      body.style.overflow = ''
+      window.scrollTo(0, scrollY)
+    }
+  }, [])
+
   const keyboardOpen = vvBottom > 50
   const sheetStyle: React.CSSProperties = keyboardOpen
     ? {
@@ -50,7 +71,11 @@ export function Modal({ title, children, actions, onClose }: ModalProps) {
   const root = document.getElementById('modal-root') ?? document.body
 
   return createPortal(
-    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div
+      ref={overlayRef}
+      className="modal-overlay"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
       <div className="modal-sheet" style={sheetStyle}>
         <div className="modal-handle" />
         <div className="modal-title">{title}</div>

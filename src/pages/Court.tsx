@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { Modal } from '../components/Modal'
-import { TimePicker } from '../components/SessionForm'
+import { TimePicker, ScheduleInput } from '../components/SessionForm'
 import type { Account } from '../types'
 import { formatCountdown, formatClockTime, SESSION_DURATION } from '../utils'
 
@@ -13,6 +13,7 @@ export function CourtPage() {
   const [now, setNow] = useState(Date.now())
 
   const [modal, setModal] = useState<
+    | { type: 'start-session' }
     | { type: 'join-session' }
     | { type: 'replace'; oldId: string }
     | { type: 'add-queue' }
@@ -24,6 +25,9 @@ export function CourtPage() {
   const [pickedAccounts, setPickedAccounts] = useState<string[]>([])
   const [timeMode, setTimeMode] = useState<'now' | 'schedule'>('now')
   const [scheduledTime, setScheduledTime] = useState('')
+  // Start-session specific: supports a third "elapsed" mode
+  const [startTimeMode, setStartTimeMode] = useState<'now' | 'elapsed' | 'schedule'>('now')
+  const [elapsedMinutes, setElapsedMinutes] = useState(15)
   // Which existing queue slot to join instead of creating new (in add-queue modal)
   const [joinTargetQueueId, setJoinTargetQueueId] = useState('')
 
@@ -64,7 +68,8 @@ export function CourtPage() {
     c.current?.accountIds.forEach(bid => busyIds.add(bid))
     c.queue.forEach(s => s.accountIds.forEach(bid => busyIds.add(bid)))
   }
-  const freeAccounts = accounts.filter(a => !busyIds.has(a.id))
+  // Only accounts with a password can be picked; past (no-password) accounts are excluded
+  const freeAccounts = accounts.filter(a => !busyIds.has(a.id) && !!a.password)
 
   const toHHMM = (ts: number) => {
     const d = new Date(ts)
@@ -75,6 +80,8 @@ export function CourtPage() {
     setPickedAccounts([])
     setJoinTargetQueueId('')
     setTimeMode('now')
+    setStartTimeMode('now')
+    setElapsedMinutes(15)
     if (m?.type === 'add-queue' && court.current) {
       setScheduledTime(toHHMM(court.current.startTime + SESSION_DURATION))
     } else {
@@ -87,6 +94,36 @@ export function CourtPage() {
     setPickedAccounts(prev =>
       prev.includes(aid) ? prev.filter(x => x !== aid) : prev.length < max ? [...prev, aid] : prev
     )
+  }
+
+  const resolveStartTime = () => {
+    if (timeMode === 'schedule' && scheduledTime) {
+      const [h, m] = scheduledTime.split(':').map(Number)
+      const d = new Date()
+      d.setHours(h, m, 0, 0)
+      return d.getTime()
+    }
+    return Date.now()
+  }
+
+  const resolveStartSessionTime = () => {
+    if (startTimeMode === 'elapsed') {
+      return Date.now() - elapsedMinutes * 60 * 1000
+    }
+    if (startTimeMode === 'schedule' && scheduledTime) {
+      const [h, m] = scheduledTime.split(':').map(Number)
+      const d = new Date()
+      d.setHours(h, m, 0, 0)
+      return d.getTime()
+    }
+    return Date.now()
+  }
+
+  const handleStartSession = () => {
+    const count = pickedAccounts.length
+    if (count !== 2 && count !== 4) return
+    store.startSession(court.id, pickedAccounts, count as 2 | 4, resolveStartSessionTime())
+    setModal(null)
   }
 
   const handleEndSession = () => {
@@ -225,7 +262,14 @@ export function CourtPage() {
             <div className="empty-state">
               <div className="empty-state__icon">🏸</div>
               <div className="empty-state__title">Court is idle</div>
-              <div className="empty-state__text">Go back to Accounts to start a session.</div>
+              <div className="empty-state__text">Pick 2 or 4 available players to start a session.</div>
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: 16, width: '100%' }}
+                onClick={() => openPickModal({ type: 'start-session' })}
+              >
+                + Start Session
+              </button>
             </div>
           )}
         </div>
@@ -313,6 +357,95 @@ export function CourtPage() {
       </div>
 
       {/* Modals */}
+
+      {modal?.type === 'start-session' && (() => {
+        const count = pickedAccounts.length
+        const valid = count === 2 || count === 4
+        const hint = count === 1 || count === 3 ? `Select 2 or 4 players (currently ${count})` : null
+        const confirmLabel = startTimeMode === 'schedule'
+          ? `Schedule (${count})`
+          : startTimeMode === 'elapsed'
+            ? `Confirm — ${elapsedMinutes} min ago (${count})`
+            : `Start Now (${count})`
+
+        const btnBase: React.CSSProperties = {
+          flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700,
+          fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
+          border: '2px solid var(--c-border)', background: '#F5FBF8',
+          color: 'var(--c-text-muted)',
+        }
+        const btnActive: React.CSSProperties = {
+          ...btnBase, border: '2px solid var(--c-primary)',
+          background: 'var(--c-primary-light)', color: 'var(--c-primary)',
+        }
+
+        return (
+          <Modal
+            title="Start Session"
+            onClose={() => setModal(null)}
+            actions={
+              <>
+                <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
+                <button className="btn btn-primary" disabled={!valid} onClick={handleStartSession}>
+                  {confirmLabel}
+                </button>
+              </>
+            }
+          >
+            {/* Start Time — always visible */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="input-label">Start Time</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <button type="button" style={startTimeMode === 'now' ? btnActive : btnBase} onClick={() => setStartTimeMode('now')}>
+                  ▶ Now
+                </button>
+                <button type="button" style={startTimeMode === 'elapsed' ? btnActive : btnBase} onClick={() => setStartTimeMode('elapsed')}>
+                  ⏮ Already started
+                </button>
+                <button type="button" style={startTimeMode === 'schedule' ? btnActive : btnBase} onClick={() => setStartTimeMode('schedule')}>
+                  ⏰ Later
+                </button>
+              </div>
+
+              {startTimeMode === 'elapsed' && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span className="input-label" style={{ margin: 0 }}>Started</span>
+                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                      {elapsedMinutes} min ago
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={44}
+                    step={1}
+                    value={elapsedMinutes}
+                    onChange={e => setElapsedMinutes(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                    <span>0 min</span>
+                    <span style={{ color: 'var(--c-text)', fontSize: 12 }}>≈ {45 - elapsedMinutes} min remaining</span>
+                    <span>44 min</span>
+                  </div>
+                </div>
+              )}
+
+              {startTimeMode === 'schedule' && (
+                <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+              )}
+            </div>
+
+            <p className="text-sm text-muted mb-2">Select 2 or 4 players:</p>
+            <AccountPicker accounts={freeAccounts} picked={pickedAccounts} max={4} onToggle={togglePick} />
+            {hint && (
+              <p style={{ marginTop: 8, fontSize: 12, color: 'var(--c-warning)', fontWeight: 600 }}>⚠ {hint}</p>
+            )}
+          </Modal>
+        )
+      })()}
+
       {modal?.type === 'join-session' && (
         <Modal
           title={`Join Session · Need ${slotsAvailable} more player${slotsAvailable > 1 ? 's' : ''}`}
@@ -468,7 +601,7 @@ function AccountPicker({ accounts, picked, max, onToggle }: {
           <div className="account-avatar" style={{ width: 32, height: 32, fontSize: 13 }}>{a.displayName[0]?.toUpperCase()}</div>
           <div>
             <div className="font-bold text-sm">{a.displayName}</div>
-            <div className="text-xs text-muted">{a.username}</div>
+            <div className="text-xs text-muted">{a.username} · {a.password}</div>
           </div>
         </div>
       ))}

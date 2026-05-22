@@ -621,7 +621,7 @@ body {
 
 /* ─── Modal ──────────────────────────────────────────────── */
 .modal-overlay {
-  position: absolute;
+  position: fixed;          /* must be fixed so it covers the viewport even when body is scrolled */
   inset: 0;
   background: rgba(13,31,23,0.52);
   backdrop-filter: blur(3px);
@@ -629,15 +629,18 @@ body {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  touch-action: none;       /* block accidental swipes on the dark backdrop */
 }
 
 .modal-sheet {
   background: var(--c-surface);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   width: 100%;
+  max-width: 430px;
   padding: 8px 20px 32px;
   max-height: 82%;
-  overflow: hidden;
+  overflow-x: hidden;       /* no horizontal scroll ever */
+  overflow-y: hidden;       /* sheet itself doesn't scroll; modal-body does */
   display: flex;
   flex-direction: column;
   animation: slide-up 0.28s cubic-bezier(0.34,1.26,0.64,1);
@@ -666,7 +669,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-.modal-body { overflow-y: auto; min-height: 0; }
+.modal-body { overflow-x: hidden; overflow-y: auto; min-height: 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 
 .modal-actions {
   display: flex;

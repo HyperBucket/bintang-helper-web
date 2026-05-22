@@ -1,6 +1,60 @@
 /** Time picker used in session / queue creation modals */
 import { useRef } from 'react'
 
+interface ScheduleInputProps {
+  value: string        // HH:MM
+  onChange: (t: string) => void
+}
+
+/** A single "tap to pick time" button with a hidden input inside.
+ *  Safe on iOS — no overflow, picker anchors just above the button. */
+export function ScheduleInput({ value, onChange }: ScheduleInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const style: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    padding: '10px 0',
+    borderRadius: 10,
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: 'pointer',
+    border: '2px solid var(--c-primary)',
+    background: 'var(--c-primary-light)',
+    color: 'var(--c-primary)',
+    position: 'relative',
+    overflow: 'visible',
+    marginTop: 10,
+  }
+
+  return (
+    <label
+      style={style}
+      onClick={() => { try { inputRef.current?.showPicker() } catch {} }}
+    >
+      ⏰  {value || 'Select time'}
+      <input
+        ref={inputRef}
+        type="time"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          position: 'absolute',
+          top: -2,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: 'none',
+        }}
+      />
+    </label>
+  )
+}
+
 interface TimePickerProps {
   mode: 'now' | 'schedule'
   scheduledTime: string   // HH:MM

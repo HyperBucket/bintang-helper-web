@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { Modal } from '../components/Modal'
-import { TimePicker } from '../components/SessionForm'
+import { TimePicker, ScheduleInput } from '../components/SessionForm'
 import type { Account, Court, DisplayAccount } from '../types'
 import { formatCountdown, SESSION_DURATION } from '../utils'
 
@@ -112,6 +112,9 @@ export function IndexPage() {
   const [scheduledTime, setScheduledTime] = useState('')
   const [targetCourtId, setTargetCourtId] = useState('')
   const [targetQueueId, setTargetQueueId] = useState('')
+  // "Already started" option for new-court modal
+  const [newCourtTimeMode, setNewCourtTimeMode] = useState<'now' | 'elapsed' | 'schedule'>('now')
+  const [elapsedMinutes, setElapsedMinutes] = useState(15)
 
   const currentHHMM = () => {
     const d = new Date()
@@ -120,6 +123,8 @@ export function IndexPage() {
 
   const openActionModal = (m: 'new-court' | 'join-session' | 'add-queue') => {
     setTimeMode('now')
+    setNewCourtTimeMode('now')
+    setElapsedMinutes(15)
     setScheduledTime(currentHHMM())
     setTargetCourtId('')
     setTargetQueueId('')
@@ -185,10 +190,23 @@ export function IndexPage() {
     return Date.now()
   }
 
+  const resolveNewCourtTime = () => {
+    if (newCourtTimeMode === 'elapsed') {
+      return Date.now() - elapsedMinutes * 60 * 1000
+    }
+    if (newCourtTimeMode === 'schedule' && scheduledTime) {
+      const [h, m] = scheduledTime.split(':').map(Number)
+      const d = new Date()
+      d.setHours(h, m, 0, 0)
+      return d.getTime()
+    }
+    return Date.now()
+  }
+
   const handleCreateCourt = () => {
     if (!newCourtName.trim()) return
     const court = addCourt(`Court ${newCourtName.trim()}`)
-    startSession(court.id, selected, selected.length as 2 | 4, resolveTime())
+    startSession(court.id, selected, selected.length as 2 | 4, resolveNewCourtTime())
     setActionModal(null)
     setNewCourtName('')
     cancelSelect()
@@ -294,9 +312,20 @@ export function IndexPage() {
               <div className="group-label group-label--available">
                 ✓ Available
                 {!selectMode && (
-                  <button className="btn btn-secondary btn-xs" style={{ marginLeft: 'auto' }} onClick={() => setSelectMode(true)}>Select</button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => setSelectMode(true)}
+                  >
+                    ☑ Select Players
+                  </button>
                 )}
               </div>
+              {!selectMode && (
+                <p style={{ fontSize: 11, color: 'var(--c-text-muted)', margin: '2px 0 6px', textAlign: 'right' }}>
+                  Tap "Select Players" to pick 2 or 4 for a court
+                </p>
+              )}
               {active.map(a => (
                 <div className="account-item" key={a.id}>
                   {selectMode && a.selectable && (
@@ -348,11 +377,15 @@ export function IndexPage() {
             </>
           )}
 
-          {/* In Session */}
+          {/* In Session — sorted by time remaining ascending (least time first) */}
           {inSession.length > 0 && (
             <>
               <div className="group-label group-label--session">▶ In Session</div>
-              {inSession.map(a => (
+              {[...inSession].sort((a, b) => {
+                const expA = courts.find(c => c.id === a.courtId)?.current?.startTime ?? 0
+                const expB = courts.find(c => c.id === b.courtId)?.current?.startTime ?? 0
+                return (expA + SESSION_DURATION) - (expB + SESSION_DURATION)
+              }).map(a => (
                 <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
                   <div className="account-avatar account-avatar--session">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
@@ -369,11 +402,15 @@ export function IndexPage() {
             </>
           )}
 
-          {/* Scheduled (future sessions) */}
+          {/* Scheduled (future sessions) — sorted by start time ascending */}
           {scheduled.length > 0 && (
             <>
               <div className="group-label" style={{ color: 'var(--c-accent)' }}>⏰ Scheduled</div>
-              {scheduled.map(a => (
+              {[...scheduled].sort((a, b) => {
+                const tA = courts.find(c => c.id === a.courtId)?.current?.startTime ?? 0
+                const tB = courts.find(c => c.id === b.courtId)?.current?.startTime ?? 0
+                return tA - tB
+              }).map(a => (
                 <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
                   <div className="account-avatar" style={{ background: 'linear-gradient(135deg,#F59E0B,#D97706)', boxShadow: '0 2px 8px rgba(245,158,11,0.28)' }}>
                     {a.displayName[0]?.toUpperCase()}
@@ -390,11 +427,15 @@ export function IndexPage() {
             </>
           )}
 
-          {/* Queued */}
+          {/* Queued — sorted by court expiry ascending so next-up courts appear first */}
           {queued.length > 0 && (
             <>
               <div className="group-label group-label--queue">⏳ In Queue</div>
-              {queued.map(a => (
+              {[...queued].sort((a, b) => {
+                const expA = courts.find(c => c.id === a.courtId)?.current?.startTime ?? 0
+                const expB = courts.find(c => c.id === b.courtId)?.current?.startTime ?? 0
+                return (expA + SESSION_DURATION) - (expB + SESSION_DURATION)
+              }).map(a => (
                 <div className="account-item" key={a.id} onClick={() => navigate(`/court/${a.courtId}`)} style={{ cursor: 'pointer' }}>
                   <div className="account-avatar account-avatar--queue">{a.displayName[0]?.toUpperCase()}</div>
                   <div className="account-info">
@@ -493,7 +534,65 @@ export function IndexPage() {
               />
             </div>
           </div>
-          <TimePicker mode={timeMode} scheduledTime={scheduledTime} onModeChange={setTimeMode} onTimeChange={setScheduledTime} />
+          {/* 3-mode time selector */}
+          {(() => {
+            const btnBase: React.CSSProperties = {
+              flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700,
+              fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
+              border: '2px solid var(--c-border)', background: '#F5FBF8',
+              color: 'var(--c-text-muted)',
+            }
+            const btnActive: React.CSSProperties = {
+              ...btnBase, border: '2px solid var(--c-primary)',
+              background: 'var(--c-primary-light)', color: 'var(--c-primary)',
+            }
+            return (
+              <div className="input-group">
+                <label className="input-label">Start Time</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" style={newCourtTimeMode === 'now' ? btnActive : btnBase} onClick={() => setNewCourtTimeMode('now')}>
+                    ▶ Now
+                  </button>
+                  <button type="button" style={newCourtTimeMode === 'elapsed' ? btnActive : btnBase} onClick={() => setNewCourtTimeMode('elapsed')}>
+                    ⏮ Already started
+                  </button>
+                  <button type="button" style={newCourtTimeMode === 'schedule' ? btnActive : btnBase} onClick={() => setNewCourtTimeMode('schedule')}>
+                    ⏰ Later
+                  </button>
+                </div>
+
+                {newCourtTimeMode === 'elapsed' && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span className="input-label" style={{ margin: 0 }}>Started</span>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                        {elapsedMinutes} min ago
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={44}
+                      step={1}
+                      value={elapsedMinutes}
+                      onChange={e => setElapsedMinutes(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                      <span>0 min</span>
+                      <span style={{ color: 'var(--c-text)', fontSize: 12 }}>≈ {45 - elapsedMinutes} min remaining</span>
+                      <span>44 min</span>
+                    </div>
+                  </div>
+                )}
+
+                {newCourtTimeMode === 'schedule' && (
+                  <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+                )}
+              </div>
+            )
+          })()}
+
           <div className="text-sm text-muted mt-2">
             Players: {selected.map(id => accounts.find(a => a.id === id)?.displayName).join(', ')}
           </div>
