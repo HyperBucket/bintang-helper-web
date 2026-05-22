@@ -96,16 +96,6 @@ export function CourtPage() {
     )
   }
 
-  const resolveStartTime = () => {
-    if (timeMode === 'schedule' && scheduledTime) {
-      const [h, m] = scheduledTime.split(':').map(Number)
-      const d = new Date()
-      d.setHours(h, m, 0, 0)
-      return d.getTime()
-    }
-    return Date.now()
-  }
-
   const resolveStartSessionTime = () => {
     if (startTimeMode === 'elapsed') {
       return Date.now() - elapsedMinutes * 60 * 1000
