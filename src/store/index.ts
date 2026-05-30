@@ -42,7 +42,7 @@ interface AppStore {
   logs: number[]
   synced: boolean   // true once first Supabase load completes
 
-  addAccount: (displayName: string, username: string, password: string) => void
+  addAccount: (displayName: string, username: string, password: string) => Promise<{ ok: boolean; error?: string }>
   updateAccount: (id: string, displayName: string, username: string, password: string) => void
   deleteAccount: (id: string) => void
 
@@ -82,26 +82,71 @@ export const useStore = create<AppStore>((set, get) => ({
       logs:  load<number[]>(STORAGE_LOGS, []),
     })
 
-    // 2. Fetch latest data from Supabase
+    // 2a. Fetch accounts from dedicated accounts table
+    supabase
+      .from('accounts')
+      .select('id, display_name, username, password')
+      .then(({ data, error }) => {
+        if (!error && data) {
+          const accounts = data.map(r => ({
+            id: r.id,
+            displayName: r.display_name,
+            username: r.username,
+            password: r.password,
+          })) as Account[]
+          set({ accounts })
+        }
+      })
+
+    // 2b. Fetch courts from club_data blob
     supabase
       .from('club_data')
-      .select('accounts, courts')
+      .select('courts')
       .eq('id', CLUB_ROW_ID)
       .single()
       .then(({ data, error }) => {
         if (!error && data) {
-          const accounts = (data.accounts as Account[]) ?? []
-          const courts   = (data.courts   as Court[])   ?? []
-          set({ accounts, courts, synced: true })
+          const courts = (data.courts as Court[]) ?? []
+          set({ courts, synced: true })
         } else {
           set({ synced: true })
         }
       })
 
-    // 3. Real-time subscription — apply remote changes to all open tabs/devices
-    // Remove existing channel first (React StrictMode calls hydrate twice in dev)
-    const existing = supabase.getChannels().find(c => c.topic === 'realtime:club_sync')
-    if (existing) supabase.removeChannel(existing)
+    // 3. Real-time: accounts table (INSERT / UPDATE / DELETE)
+    const existingAcc = supabase.getChannels().find(c => c.topic === 'realtime:accounts_sync')
+    if (existingAcc) supabase.removeChannel(existingAcc)
+
+    supabase
+      .channel('accounts_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'accounts' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const r = payload.new as { id: string; display_name: string; username: string; password: string }
+            const acc: Account = { id: r.id, displayName: r.display_name, username: r.username, password: r.password }
+            // Deduplicate — optimistic update may have already added it locally
+            if (!get().accounts.some(a => a.id === acc.id)) {
+              set({ accounts: [...get().accounts, acc] })
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            const r = payload.new as { id: string; display_name: string; username: string; password: string }
+            set({ accounts: get().accounts.map(a => a.id === r.id
+              ? { id: r.id, displayName: r.display_name, username: r.username, password: r.password }
+              : a
+            )})
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as { id: string }).id
+            set({ accounts: get().accounts.filter(a => a.id !== oldId) })
+          }
+        }
+      )
+      .subscribe()
+
+    // 4. Real-time: courts via club_data blob
+    const existingCourts = supabase.getChannels().find(c => c.topic === 'realtime:club_sync')
+    if (existingCourts) supabase.removeChannel(existingCourts)
 
     supabase
       .channel('club_sync')
@@ -109,9 +154,9 @@ export const useStore = create<AppStore>((set, get) => ({
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'club_data', filter: `id=eq.${CLUB_ROW_ID}` },
         (payload) => {
-          const { accounts, courts } = payload.new as { accounts: Account[]; courts: Court[] }
+          const { courts } = payload.new as { courts: Court[] }
           applyingRemote = true
-          set({ accounts, courts })
+          set({ courts })
           setTimeout(() => { applyingRemote = false }, 100)
         }
       )
@@ -126,19 +171,38 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   // ── Accounts ─────────────────────────────────────────────
-  addAccount(displayName, username, password) {
+  // Each operation targets its own row — no full-blob overwrite, no race conditions.
+  async addAccount(displayName, username, password) {
     const account: Account = { id: generateId(), displayName, username, password }
-    const accounts = [...get().accounts, account]
     const myIds = [...get().myIds, account.id]
     saveLocal(STORAGE_MY_IDS, myIds)
-    set({ accounts, myIds })
-    scheduleCloudSync(accounts, get().courts)
+    // Optimistic local update so UI feels instant
+    set({ accounts: [...get().accounts, account], myIds })
+
+    const { error } = await supabase
+      .from('accounts')
+      .insert({ id: account.id, display_name: displayName, username, password })
+
+    if (error) {
+      // Roll back optimistic update
+      set({
+        accounts: get().accounts.filter(a => a.id !== account.id),
+        myIds: get().myIds.filter(id => id !== account.id),
+      })
+      saveLocal(STORAGE_MY_IDS, get().myIds.filter(id => id !== account.id))
+      return { ok: false, error: error.message }
+    }
+    return { ok: true }
   },
 
   updateAccount(id, displayName, username, password) {
     const accounts = get().accounts.map(a => a.id === id ? { ...a, displayName, username, password } : a)
     set({ accounts })
-    scheduleCloudSync(accounts, get().courts)
+    supabase
+      .from('accounts')
+      .update({ display_name: displayName, username, password })
+      .eq('id', id)
+      .then(({ error }) => { if (error) console.error('updateAccount:', error.message) })
   },
 
   deleteAccount(id) {
@@ -146,7 +210,11 @@ export const useStore = create<AppStore>((set, get) => ({
     const myIds = get().myIds.filter(mid => mid !== id)
     saveLocal(STORAGE_MY_IDS, myIds)
     set({ accounts, myIds })
-    scheduleCloudSync(accounts, get().courts)
+    supabase
+      .from('accounts')
+      .delete()
+      .eq('id', id)
+      .then(({ error }) => { if (error) console.error('deleteAccount:', error.message) })
   },
 
   // ── Courts ───────────────────────────────────────────────

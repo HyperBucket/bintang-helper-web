@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
+import { useToast } from '../store/toast'
 import { Modal } from '../components/Modal'
 import { TimePicker, ScheduleInput } from '../components/SessionForm'
 import type { Account, Court, DisplayAccount } from '../types'
@@ -92,6 +93,7 @@ function getDisplayAccounts(
 export function IndexPage() {
   const navigate = useNavigate()
   const { accounts, courts, addAccount, updateAccount, deleteAccount, addCourt, startSession } = useStore()
+  const toast = useToast()
 
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
@@ -155,13 +157,18 @@ export function IndexPage() {
 
   const cancelSelect = () => { setSelectMode(false); setSelected([]) }
 
-  const handleAddAccount = () => {
+  const handleAddAccount = async () => {
     const { displayName, username, password } = addForm
     if (!username.trim() || !password.trim()) return
     const name = displayName.trim() || username.trim().slice(0, 2).toUpperCase()
-    addAccount(name, username.trim(), password.trim())
-    setAddForm({ displayName: '', username: '', password: '' })
-    setShowAdd(false)
+    const result = await addAccount(name, username.trim(), password.trim())
+    if (result.ok) {
+      toast.show(`${name} added successfully`, 'success')
+      setAddForm({ displayName: '', username: '', password: '' })
+      setShowAdd(false)
+    } else {
+      toast.show(`Failed to add player: ${result.error ?? 'unknown error'}`, 'error')
+    }
   }
 
   const openEdit = (a: Account) => {

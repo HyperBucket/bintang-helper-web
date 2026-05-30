@@ -5,6 +5,7 @@ import { IndexPage } from './pages/Index'
 import { CourtsPage } from './pages/Courts'
 import { CourtPage } from './pages/Court'
 import { LogsPage } from './pages/Logs'
+import { Toast } from './components/Toast'
 
 function AppInner() {
   const { hydrate, addLog, tick, synced } = useStore()
@@ -37,6 +38,7 @@ function AppInner() {
         <Route path="/court/:id" element={<CourtPage />} />
         <Route path="/logs" element={<LogsPage />} />
       </Routes>
+      <Toast />
       <div id="modal-root" />
     </div>
   )
