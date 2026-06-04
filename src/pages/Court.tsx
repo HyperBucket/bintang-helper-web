@@ -410,8 +410,6 @@ export function CourtPage() {
       {/* Modals */}
 
       {modal?.type === 'edit-start-time' && currentSession && (() => {
-        const isCurrentlyScheduled = currentSession.startTime > now
-
         const btnBase: React.CSSProperties = {
           flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700,
           fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
@@ -434,19 +432,15 @@ export function CourtPage() {
               </>
             }
           >
-            {/* Mode toggle — show relevant options based on current state */}
+            {/* Mode toggle — always show all three options */}
             <div className="input-label">Start Time</div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, marginBottom: 14 }}>
-              {!isCurrentlyScheduled && (
-                <button type="button" style={editTimeMode === 'elapsed' ? btnActive : btnBase} onClick={() => setEditTimeMode('elapsed')}>
-                  ⏮ Started X min ago
-                </button>
-              )}
-              {isCurrentlyScheduled && (
-                <button type="button" style={editTimeMode === 'in-minutes' ? btnActive : btnBase} onClick={() => setEditTimeMode('in-minutes')}>
-                  ⏭ In X min
-                </button>
-              )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+              <button type="button" style={editTimeMode === 'elapsed' ? btnActive : btnBase} onClick={() => setEditTimeMode('elapsed')}>
+                ⏮ X min ago
+              </button>
+              <button type="button" style={editTimeMode === 'in-minutes' ? btnActive : btnBase} onClick={() => setEditTimeMode('in-minutes')}>
+                ⏭ In X min
+              </button>
               <button type="button" style={editTimeMode === 'at-time' ? btnActive : btnBase} onClick={() => setEditTimeMode('at-time')}>
                 🕐 At time
               </button>
@@ -483,13 +477,13 @@ export function CourtPage() {
                   </span>
                 </div>
                 <input
-                  type="range" min={1} max={90} step={1}
+                  type="range" min={0} max={90} step={1}
                   value={editFutureMinutes}
                   onChange={e => setEditFutureMinutes(Number(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--c-primary)' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
-                  <span>1 min</span>
+                  <span>0 min</span>
                   <span>90 min</span>
                 </div>
               </div>
