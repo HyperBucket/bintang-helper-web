@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { useToast } from '../store/toast'
+import { supabase } from '../lib/supabase'
 import { Modal } from '../components/Modal'
 import { TimePicker, ScheduleInput } from '../components/SessionForm'
 import type { Account, Court, DisplayAccount } from '../types'
@@ -102,6 +103,8 @@ export function IndexPage() {
   // Add account modal
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ displayName: '', username: '', password: '' })
+  const [addError, setAddError] = useState<{ message: string; existingId?: string } | null>(null)
+  const [checkingUsername, setCheckingUsername] = useState(false)
 
   // Edit account modal
   const [editTarget, setEditTarget] = useState<Account | null>(null)
@@ -162,9 +165,33 @@ export function IndexPage() {
 
   const cancelSelect = () => { setSelectMode(false); setSelected([]) }
 
+  const handleUsernameBlur = async () => {
+    const username = addForm.username.trim()
+    if (!username) return
+    setCheckingUsername(true)
+    const { data } = await supabase
+      .from('accounts')
+      .select('id, username, password')
+      .ilike('username', username)   // case-insensitive match
+      .maybeSingle()
+    setCheckingUsername(false)
+    if (data) {
+      const isPast = !data.password
+      setAddError({
+        message: isPast
+          ? `"${data.username}" is a past account. Edit it in Past Accounts to re-activate.`
+          : `"${data.username}" is already an active player.`,
+        existingId: isPast ? data.id : undefined,
+      })
+    }
+  }
+
   const handleAddAccount = async () => {
     const { displayName, username, password } = addForm
     if (!username.trim() || !password.trim()) return
+    // Block submit if blur-check already found a duplicate
+    if (addError) return
+
     const name = displayName.trim() || username.trim().slice(0, 2).toUpperCase()
     const result = await addAccount(name, username.trim(), password.trim())
     if (result.ok) {
@@ -172,7 +199,8 @@ export function IndexPage() {
       setAddForm({ displayName: '', username: '', password: '' })
       setShowAdd(false)
     } else {
-      toast.show(`Failed to add player: ${result.error ?? 'unknown error'}`, 'error')
+      // DB constraint violation (race condition) — still surfaces a clear error
+      setAddError({ message: `Username already taken — someone else just registered it.` })
     }
   }
 
@@ -481,9 +509,9 @@ export function IndexPage() {
 
       {/* Add account modal */}
       {showAdd && (
-        <Modal title="Add Account" onClose={() => setShowAdd(false)} actions={
+        <Modal title="Add Account" onClose={() => { setShowAdd(false); setAddError(null); setAddForm({ displayName: '', username: '', password: '' }) }} actions={
           <>
-            <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn btn-secondary" onClick={() => { setShowAdd(false); setAddError(null); setAddForm({ displayName: '', username: '', password: '' }) }}>Cancel</button>
             <button className="btn btn-primary" onClick={handleAddAccount}>Add</button>
           </>
         }>
@@ -493,7 +521,65 @@ export function IndexPage() {
           </div>
           <div className="input-group">
             <label className="input-label">Username</label>
-            <input className="input" placeholder="Username" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
+            <div style={{ position: 'relative' }}>
+              <input
+                className="input"
+                placeholder="Username"
+                value={addForm.username}
+                style={addError ? { borderColor: 'var(--c-danger, #EF4444)', paddingRight: 36 } : { paddingRight: 36 }}
+                onChange={e => { setAddError(null); setAddForm(f => ({ ...f, username: e.target.value })) }}
+                onBlur={handleUsernameBlur}
+              />
+              {checkingUsername && (
+                <span style={{
+                  position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 13, color: 'var(--c-text-muted)', pointerEvents: 'none',
+                }}>⏳</span>
+              )}
+              {!checkingUsername && addError && (
+                <span style={{
+                  position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 15, pointerEvents: 'none',
+                }}>✕</span>
+              )}
+              {!checkingUsername && !addError && addForm.username.trim() && (
+                <span style={{
+                  position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 15, color: 'var(--c-primary)', pointerEvents: 'none',
+                }}>✓</span>
+              )}
+            </div>
+            {addError && (
+              <div style={{
+                marginTop: 8, padding: '10px 12px', borderRadius: 10,
+                background: '#FEF2F2', border: '1.5px solid #FECACA',
+                fontSize: 13, color: '#B91C1C', lineHeight: 1.45,
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+              }}>
+                <span style={{ flexShrink: 0, marginTop: 1 }}>⚠</span>
+                <div style={{ flex: 1 }}>
+                  {addError.message}
+                  {addError.existingId && (
+                    <div style={{ marginTop: 6 }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: 12 }}
+                        onClick={() => {
+                          const a = accounts.find(acc => acc.id === addError.existingId)
+                          if (!a) return
+                          setShowAdd(false)
+                          setAddError(null)
+                          setPastOpen(true)
+                          openEdit(a)
+                        }}
+                      >
+                        ✏ Edit past account
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <div className="input-group">
             <label className="input-label">Password</label>
