@@ -86,11 +86,12 @@ interface AppStore {
   addCourt:    (name: string) => Court
   deleteCourt: (courtId: string) => void
 
-  startSession:           (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
-  endSession:             (courtId: string) => void
-  replacePlayerInSession: (courtId: string, oldAccountId: string, newAccountId: string) => void
-  removePlayerFromSession:(courtId: string, accountId: string) => void
-  joinSession:            (courtId: string, accountIds: string[]) => void
+  startSession:            (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
+  endSession:              (courtId: string) => void
+  updateSessionStartTime:  (courtId: string, newStartTime: number) => void
+  replacePlayerInSession:  (courtId: string, oldAccountId: string, newAccountId: string) => void
+  removePlayerFromSession: (courtId: string, accountId: string) => void
+  joinSession:             (courtId: string, accountIds: string[]) => void
 
   addToQueue:          (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
   removeQueue:         (courtId: string, sessionId: string) => void
@@ -291,6 +292,25 @@ export const useStore = create<AppStore>((set, get) => ({
       }
     }
     doWrite()
+  },
+
+  updateSessionStartTime(courtId, newStartTime) {
+    const court = get().courts.find(c => c.id === courtId)
+    if (!court?.current) return
+    const sessionId = court.current.id
+
+    // Optimistic
+    set({
+      courts: get().courts.map(c =>
+        c.id !== courtId || !c.current ? c
+          : { ...c, current: { ...c.current, startTime: newStartTime } }
+      ),
+    })
+
+    supabase.from('sessions')
+      .update({ start_time: newStartTime })
+      .eq('id', sessionId)
+      .then(({ error }) => { if (error) console.error('updateSessionStartTime:', error.message) })
   },
 
   replacePlayerInSession(courtId, oldAccountId, newAccountId) {

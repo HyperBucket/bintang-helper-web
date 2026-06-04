@@ -117,6 +117,9 @@ export function IndexPage() {
   // "Already started" option for new-court modal
   const [newCourtTimeMode, setNewCourtTimeMode] = useState<'now' | 'elapsed' | 'schedule'>('now')
   const [elapsedMinutes, setElapsedMinutes] = useState(15)
+  // "Later" sub-mode: slide "in X minutes" or pick exact clock time
+  const [scheduleSubMode, setScheduleSubMode] = useState<'in-minutes' | 'at-time'>('in-minutes')
+  const [scheduleMinutes, setScheduleMinutes] = useState(30)
 
   const currentHHMM = () => {
     const d = new Date()
@@ -127,6 +130,8 @@ export function IndexPage() {
     setTimeMode('now')
     setNewCourtTimeMode('now')
     setElapsedMinutes(15)
+    setScheduleSubMode('in-minutes')
+    setScheduleMinutes(30)
     setScheduledTime(currentHHMM())
     setTargetCourtId('')
     setTargetQueueId('')
@@ -201,11 +206,16 @@ export function IndexPage() {
     if (newCourtTimeMode === 'elapsed') {
       return Date.now() - elapsedMinutes * 60 * 1000
     }
-    if (newCourtTimeMode === 'schedule' && scheduledTime) {
-      const [h, m] = scheduledTime.split(':').map(Number)
-      const d = new Date()
-      d.setHours(h, m, 0, 0)
-      return d.getTime()
+    if (newCourtTimeMode === 'schedule') {
+      if (scheduleSubMode === 'in-minutes') {
+        return Date.now() + scheduleMinutes * 60 * 1000
+      }
+      if (scheduledTime) {
+        const [h, m] = scheduledTime.split(':').map(Number)
+        const d = new Date()
+        d.setHours(h, m, 0, 0)
+        return d.getTime()
+      }
     }
     return Date.now()
   }
@@ -594,7 +604,53 @@ export function IndexPage() {
                 )}
 
                 {newCourtTimeMode === 'schedule' && (
-                  <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+                  <div style={{ marginTop: 12 }}>
+                    {/* Sub-mode toggle */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                      <button
+                        type="button"
+                        style={scheduleSubMode === 'in-minutes' ? btnActive : btnBase}
+                        onClick={() => setScheduleSubMode('in-minutes')}
+                      >
+                        In X min
+                      </button>
+                      <button
+                        type="button"
+                        style={scheduleSubMode === 'at-time' ? btnActive : btnBase}
+                        onClick={() => setScheduleSubMode('at-time')}
+                      >
+                        At time
+                      </button>
+                    </div>
+
+                    {scheduleSubMode === 'in-minutes' && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <span className="input-label" style={{ margin: 0 }}>Starts in</span>
+                          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                            {scheduleMinutes} min
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={1}
+                          max={90}
+                          step={1}
+                          value={scheduleMinutes}
+                          onChange={e => setScheduleMinutes(Number(e.target.value))}
+                          style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                          <span>1 min</span>
+                          <span>90 min</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {scheduleSubMode === 'at-time' && (
+                      <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+                    )}
+                  </div>
                 )}
               </div>
             )

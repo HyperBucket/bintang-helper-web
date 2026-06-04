@@ -79,7 +79,7 @@ export function CourtsPage() {
 
   const handleAdd = () => {
     if (!courtName.trim()) return
-    addCourt(courtName.trim())
+    addCourt(`Court ${courtName.trim()}`)
     setCourtName('')
     setShowAdd(false)
   }
@@ -161,7 +161,21 @@ export function CourtsPage() {
         }>
           <div className="input-group">
             <label className="input-label">Court Name</label>
-            <input className="input" placeholder="e.g. Court 3" value={courtName} onChange={e => setCourtName(e.target.value)} autoFocus />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              <span style={{
+                padding: '11px 12px', background: '#F0F7FF', border: '1.5px solid var(--c-border)',
+                borderRight: 'none', borderRadius: '10px 0 0 10px', color: 'var(--c-text-muted)',
+                fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap',
+              }}>Court</span>
+              <input
+                className="input"
+                style={{ borderRadius: '0 10px 10px 0' }}
+                placeholder="3"
+                value={courtName}
+                onChange={e => setCourtName(e.target.value)}
+                autoFocus
+              />
+            </div>
           </div>
         </Modal>
       )}

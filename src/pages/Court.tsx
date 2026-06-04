@@ -14,6 +14,7 @@ export function CourtPage() {
 
   const [modal, setModal] = useState<
     | { type: 'start-session' }
+    | { type: 'edit-start-time' }
     | { type: 'join-session' }
     | { type: 'replace'; oldId: string }
     | { type: 'add-queue' }
@@ -28,6 +29,14 @@ export function CourtPage() {
   // Start-session specific: supports a third "elapsed" mode
   const [startTimeMode, setStartTimeMode] = useState<'now' | 'elapsed' | 'schedule'>('now')
   const [elapsedMinutes, setElapsedMinutes] = useState(15)
+  // "Later" sub-mode inside start-session
+  const [scheduleSubMode, setScheduleSubMode] = useState<'in-minutes' | 'at-time'>('in-minutes')
+  const [scheduleMinutes, setScheduleMinutes] = useState(30)
+  // Edit start time modal
+  const [editTimeMode, setEditTimeMode] = useState<'elapsed' | 'in-minutes' | 'at-time'>('at-time')
+  const [editElapsedMinutes, setEditElapsedMinutes] = useState(0)
+  const [editFutureMinutes, setEditFutureMinutes] = useState(30)
+  const [editAtTime, setEditAtTime] = useState('')
   // Which existing queue slot to join instead of creating new (in add-queue modal)
   const [joinTargetQueueId, setJoinTargetQueueId] = useState('')
 
@@ -82,6 +91,8 @@ export function CourtPage() {
     setTimeMode('now')
     setStartTimeMode('now')
     setElapsedMinutes(15)
+    setScheduleSubMode('in-minutes')
+    setScheduleMinutes(30)
     if (m?.type === 'add-queue' && court.current) {
       setScheduledTime(toHHMM(court.current.startTime + SESSION_DURATION))
     } else {
@@ -100,11 +111,16 @@ export function CourtPage() {
     if (startTimeMode === 'elapsed') {
       return Date.now() - elapsedMinutes * 60 * 1000
     }
-    if (startTimeMode === 'schedule' && scheduledTime) {
-      const [h, m] = scheduledTime.split(':').map(Number)
-      const d = new Date()
-      d.setHours(h, m, 0, 0)
-      return d.getTime()
+    if (startTimeMode === 'schedule') {
+      if (scheduleSubMode === 'in-minutes') {
+        return Date.now() + scheduleMinutes * 60 * 1000
+      }
+      if (scheduledTime) {
+        const [h, m] = scheduledTime.split(':').map(Number)
+        const d = new Date()
+        d.setHours(h, m, 0, 0)
+        return d.getTime()
+      }
     }
     return Date.now()
   }
@@ -136,6 +152,39 @@ export function CourtPage() {
   const handleRemovePlayer = (accountId: string) => {
     if (!confirm('Remove this player from the session?')) return
     store.removePlayerFromSession(court.id, accountId)
+  }
+
+  const openEditTimeModal = () => {
+    if (!currentSession) return
+    // Pre-fill "At time" with the current session's time
+    setEditAtTime(toHHMM(currentSession.startTime))
+    const diffMs = Date.now() - currentSession.startTime
+    if (diffMs > 0) {
+      // already started — default to elapsed mode
+      setEditTimeMode('elapsed')
+      setEditElapsedMinutes(Math.round(diffMs / 60000))
+    } else {
+      // scheduled — default to in-minutes mode
+      setEditTimeMode('in-minutes')
+      setEditFutureMinutes(Math.round(-diffMs / 60000) || 30)
+    }
+    setModal({ type: 'edit-start-time' })
+  }
+
+  const handleEditStartTime = () => {
+    let newStartTime = Date.now()
+    if (editTimeMode === 'elapsed') {
+      newStartTime = Date.now() - editElapsedMinutes * 60 * 1000
+    } else if (editTimeMode === 'in-minutes') {
+      newStartTime = Date.now() + editFutureMinutes * 60 * 1000
+    } else if (editAtTime) {
+      const [h, m] = editAtTime.split(':').map(Number)
+      const d = new Date()
+      d.setHours(h, m, 0, 0)
+      newStartTime = d.getTime()
+    }
+    store.updateSessionStartTime(court.id, newStartTime)
+    setModal(null)
   }
 
   const handleReplace = () => {
@@ -211,12 +260,24 @@ export function CourtPage() {
                   <span className="session-header__icon">{isScheduled ? '⏰' : '▶'}</span>
                   <span className="session-header__title">{isScheduled ? 'Scheduled' : 'Playing Now'}</span>
                 </div>
-                <span className="session-header__time">
-                  {isScheduled
-                    ? `Starts ${formatClockTime(currentSession.startTime)}`
-                    : `${formatClockTime(currentSession.startTime)} → ${formatClockTime(expiry)}`
-                  }
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="session-header__time">
+                    {isScheduled
+                      ? `Starts ${formatClockTime(currentSession.startTime)}`
+                      : `${formatClockTime(currentSession.startTime)} → ${formatClockTime(expiry)}`
+                    }
+                  </span>
+                  <button
+                    onClick={openEditTimeModal}
+                    style={{
+                      background: 'rgba(255,255,255,0.18)', border: '1.5px solid rgba(255,255,255,0.35)',
+                      borderRadius: 8, padding: '3px 10px', fontSize: 12, cursor: 'pointer',
+                      color: 'inherit', lineHeight: 1.4, flexShrink: 0, fontWeight: 600,
+                    }}
+                  >
+                    ✏ Change time
+                  </button>
+                </div>
               </div>
               <div className="session-body">
                 {currentSession.accountIds.map(aid => {
@@ -348,6 +409,99 @@ export function CourtPage() {
 
       {/* Modals */}
 
+      {modal?.type === 'edit-start-time' && currentSession && (() => {
+        const isCurrentlyScheduled = currentSession.startTime > now
+
+        const btnBase: React.CSSProperties = {
+          flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700,
+          fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
+          border: '2px solid var(--c-border)', background: '#F5FBF8',
+          color: 'var(--c-text-muted)',
+        }
+        const btnActive: React.CSSProperties = {
+          ...btnBase, border: '2px solid var(--c-primary)',
+          background: 'var(--c-primary-light)', color: 'var(--c-primary)',
+        }
+
+        return (
+          <Modal
+            title="Edit Start Time"
+            onClose={() => setModal(null)}
+            actions={
+              <>
+                <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleEditStartTime}>Save</button>
+              </>
+            }
+          >
+            {/* Mode toggle — show relevant options based on current state */}
+            <div className="input-label">Start Time</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, marginBottom: 14 }}>
+              {!isCurrentlyScheduled && (
+                <button type="button" style={editTimeMode === 'elapsed' ? btnActive : btnBase} onClick={() => setEditTimeMode('elapsed')}>
+                  ⏮ Started X min ago
+                </button>
+              )}
+              {isCurrentlyScheduled && (
+                <button type="button" style={editTimeMode === 'in-minutes' ? btnActive : btnBase} onClick={() => setEditTimeMode('in-minutes')}>
+                  ⏭ In X min
+                </button>
+              )}
+              <button type="button" style={editTimeMode === 'at-time' ? btnActive : btnBase} onClick={() => setEditTimeMode('at-time')}>
+                🕐 At time
+              </button>
+            </div>
+
+            {editTimeMode === 'elapsed' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span className="input-label" style={{ margin: 0 }}>Started</span>
+                  <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                    {editElapsedMinutes} min ago
+                  </span>
+                </div>
+                <input
+                  type="range" min={0} max={60} step={1}
+                  value={editElapsedMinutes}
+                  onChange={e => setEditElapsedMinutes(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                  <span>Just now</span>
+                  <span style={{ color: 'var(--c-text)', fontSize: 12 }}>≈ {45 - editElapsedMinutes} min remaining</span>
+                  <span>60 min ago</span>
+                </div>
+              </div>
+            )}
+
+            {editTimeMode === 'in-minutes' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span className="input-label" style={{ margin: 0 }}>Starts in</span>
+                  <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                    {editFutureMinutes} min
+                  </span>
+                </div>
+                <input
+                  type="range" min={1} max={90} step={1}
+                  value={editFutureMinutes}
+                  onChange={e => setEditFutureMinutes(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                  <span>1 min</span>
+                  <span>90 min</span>
+                </div>
+              </div>
+            )}
+
+            {editTimeMode === 'at-time' && (
+              <ScheduleInput value={editAtTime} onChange={setEditAtTime} />
+            )}
+          </Modal>
+        )
+      })()}
+
       {modal?.type === 'start-session' && (() => {
         const count = pickedAccounts.length
         const valid = count === 2 || count === 4
@@ -423,7 +577,53 @@ export function CourtPage() {
               )}
 
               {startTimeMode === 'schedule' && (
-                <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+                <div style={{ marginTop: 12 }}>
+                  {/* Sub-mode toggle */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <button
+                      type="button"
+                      style={scheduleSubMode === 'in-minutes' ? btnActive : btnBase}
+                      onClick={() => setScheduleSubMode('in-minutes')}
+                    >
+                      In X min
+                    </button>
+                    <button
+                      type="button"
+                      style={scheduleSubMode === 'at-time' ? btnActive : btnBase}
+                      onClick={() => setScheduleSubMode('at-time')}
+                    >
+                      At time
+                    </button>
+                  </div>
+
+                  {scheduleSubMode === 'in-minutes' && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span className="input-label" style={{ margin: 0 }}>Starts in</span>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--c-primary)' }}>
+                          {scheduleMinutes} min
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={90}
+                        step={1}
+                        value={scheduleMinutes}
+                        onChange={e => setScheduleMinutes(Number(e.target.value))}
+                        style={{ width: '100%', accentColor: 'var(--c-primary)' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+                        <span>1 min</span>
+                        <span>90 min</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {scheduleSubMode === 'at-time' && (
+                    <ScheduleInput value={scheduledTime} onChange={setScheduledTime} />
+                  )}
+                </div>
               )}
             </div>
 
