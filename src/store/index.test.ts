@@ -140,8 +140,8 @@ describe('addCourt', () => {
     expect(court.queue).toHaveLength(0)
   })
 
-  it('returns the created court', () => {
-    const court = useStore.getState().addCourt('Court B')
+  it('returns the created court', async () => {
+    const court = await useStore.getState().addCourt('Court B')
     expect(court.name).toBe('Court B')
     expect(court.id).toBeTruthy()
   })
