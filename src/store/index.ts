@@ -83,7 +83,7 @@ interface AppStore {
   updateAccount: (id: string, displayName: string, username: string, password: string) => void
   deleteAccount: (id: string) => void
 
-  addCourt:    (name: string) => Court
+  addCourt:    (name: string) => Promise<Court>
   deleteCourt: (courtId: string) => void
 
   startSession:            (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
@@ -219,11 +219,12 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   // ── Courts ────────────────────────────────────────────────────────────
-  addCourt(name) {
+  async addCourt(name) {
     const court: Court = { id: generateId(), name, current: null, queue: [] }
     set({ courts: [...get().courts, court] })
-    supabase.from('courts').insert({ id: court.id, name })
-      .then(({ error }) => { if (error) console.error('addCourt:', error.message) })
+    // Await the DB write so foreign-key dependents (sessions) can safely insert after
+    const { error } = await supabase.from('courts').insert({ id: court.id, name })
+    if (error) console.error('addCourt:', error.message)
     return court
   },
 

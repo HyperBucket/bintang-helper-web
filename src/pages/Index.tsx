@@ -248,10 +248,13 @@ export function IndexPage() {
     return Date.now()
   }
 
-  const handleCreateCourt = () => {
+  const handleCreateCourt = async () => {
     if (!newCourtName.trim()) return
-    const court = addCourt(`Court ${newCourtName.trim()}`)
-    startSession(court.id, selected, selected.length as 2 | 4, resolveNewCourtTime())
+    // Await the court DB insert first — sessions table has a FK on court_id
+    const court = await addCourt(`Court ${newCourtName.trim()}`)
+    if (selected.length === 2 || selected.length === 4) {
+      startSession(court.id, selected, selected.length as 2 | 4, resolveNewCourtTime())
+    }
     setActionModal(null)
     setNewCourtName('')
     cancelSelect()
