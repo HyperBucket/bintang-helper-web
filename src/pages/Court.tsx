@@ -41,8 +41,14 @@ export function CourtPage() {
   const [joinTargetQueueId, setJoinTargetQueueId] = useState('')
 
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 500)
-    return () => clearInterval(tick)
+    const update = () => setNow(Date.now())
+    const id = setInterval(update, 500)
+    // Snap immediately when user returns to the tab — don't wait for next interval
+    document.addEventListener('visibilitychange', update)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', update)
+    }
   }, [])
 
   const court = store.courts.find(c => c.id === id)

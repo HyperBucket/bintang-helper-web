@@ -143,8 +143,13 @@ export function IndexPage() {
 
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
+    const update = () => setNow(Date.now())
+    const id = setInterval(update, 1000)
+    document.addEventListener('visibilitychange', update)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', update)
+    }
   }, [])
 
   const displayAccounts = getDisplayAccounts(accounts, courts, selected, selectMode, now)

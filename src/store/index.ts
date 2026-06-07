@@ -101,6 +101,7 @@ interface AppStore {
   promoteQueue:        (courtId: string) => void
 
   tick:     () => void
+  refresh:  () => void
   hydrate:  () => void
   addLog:   () => void
 }
@@ -509,6 +510,11 @@ export const useStore = create<AppStore>((set, get) => ({
       .update({ status: 'current', start_time: newStartTime })
       .eq('id', next.id)
       .then(({ error }) => { if (error) console.error('promoteQueue:', error.message) })
+  },
+
+  // ── Refresh (re-fetch from DB, used on visibility change) ────────────
+  refresh() {
+    fetchCourtsFromDB().then(courts => set({ courts }))
   },
 
   // ── Tick ──────────────────────────────────────────────────────────────

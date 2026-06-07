@@ -70,8 +70,13 @@ export function CourtsPage() {
   const [courtName, setCourtName] = useState('')
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 500)
-    return () => clearInterval(id)
+    const update = () => setNow(Date.now())
+    const id = setInterval(update, 500)
+    document.addEventListener('visibilitychange', update)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', update)
+    }
   }, [])
 
   const displayCourts = courts.map(c => toDisplayCourt(c, now))

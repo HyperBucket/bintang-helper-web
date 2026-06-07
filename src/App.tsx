@@ -8,7 +8,7 @@ import { LogsPage } from './pages/Logs'
 import { Toast } from './components/Toast'
 
 function AppInner() {
-  const { hydrate, addLog, tick, synced } = useStore()
+  const { hydrate, addLog, tick, refresh, synced } = useStore()
 
   useEffect(() => {
     hydrate()
@@ -19,6 +19,20 @@ function AppInner() {
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [tick])
+
+  // When the user returns to the tab/app after it was backgrounded:
+  // 1. Re-fetch courts from DB (sessions may have expired or changed while away)
+  // 2. Run tick() immediately to end any locally-tracked expired sessions
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        tick()
+        refresh()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [tick, refresh])
 
   return (
     <div className="app-shell">
