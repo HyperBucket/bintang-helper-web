@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useReducer } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { Modal } from '../components/Modal'
@@ -65,20 +65,23 @@ function toDisplayCourt(c: Court, now: number): DisplayCourt {
 export function CourtsPage() {
   const navigate = useNavigate()
   const { courts, addCourt, deleteCourt } = useStore()
-  const [now, setNow] = useState(Date.now())
+  const [, forceUpdate] = useReducer(n => n + 1, 0)
   const [showAdd, setShowAdd] = useState(false)
   const [courtName, setCourtName] = useState('')
 
   useEffect(() => {
-    const update = () => setNow(Date.now())
-    const id = setInterval(update, 500)
-    document.addEventListener('visibilitychange', update)
+    const id = setInterval(forceUpdate, 500)
+    document.addEventListener('visibilitychange', forceUpdate)
+    window.addEventListener('focus', forceUpdate)
     return () => {
       clearInterval(id)
-      document.removeEventListener('visibilitychange', update)
+      document.removeEventListener('visibilitychange', forceUpdate)
+      window.removeEventListener('focus', forceUpdate)
     }
   }, [])
 
+  // Date.now() is evaluated at render time — always correct, never stale
+  const now = Date.now()
   const displayCourts = courts.map(c => toDisplayCourt(c, now))
   const activeSessions = courts.filter(c => c.current && c.current.startTime <= now).length
 

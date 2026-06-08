@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useReducer } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { Modal } from '../components/Modal'
@@ -10,7 +10,7 @@ export function CourtPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const store = useStore()
-  const [now, setNow] = useState(Date.now())
+  const [, forceUpdate] = useReducer(n => n + 1, 0)
 
   const [modal, setModal] = useState<
     | { type: 'start-session' }
@@ -41,17 +41,19 @@ export function CourtPage() {
   const [joinTargetQueueId, setJoinTargetQueueId] = useState('')
 
   useEffect(() => {
-    const update = () => setNow(Date.now())
-    const id = setInterval(update, 500)
-    // Snap immediately when user returns to the tab — don't wait for next interval
-    document.addEventListener('visibilitychange', update)
+    const id = setInterval(forceUpdate, 500)
+    document.addEventListener('visibilitychange', forceUpdate)
+    window.addEventListener('focus', forceUpdate)
     return () => {
       clearInterval(id)
-      document.removeEventListener('visibilitychange', update)
+      document.removeEventListener('visibilitychange', forceUpdate)
+      window.removeEventListener('focus', forceUpdate)
     }
   }, [])
 
   const court = store.courts.find(c => c.id === id)
+  // Evaluated at render time — always correct, never stale
+  const now = Date.now()
 
   useEffect(() => {
     if (!court) navigate('/', { replace: true })

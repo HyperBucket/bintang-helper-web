@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useReducer } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { useToast } from '../store/toast'
@@ -141,16 +141,18 @@ export function IndexPage() {
     setActionModal(m)
   }
 
-  const [now, setNow] = useState(Date.now())
+  const [, forceUpdate] = useReducer(n => n + 1, 0)
   useEffect(() => {
-    const update = () => setNow(Date.now())
-    const id = setInterval(update, 1000)
-    document.addEventListener('visibilitychange', update)
+    const id = setInterval(forceUpdate, 1000)
+    document.addEventListener('visibilitychange', forceUpdate)
+    window.addEventListener('focus', forceUpdate)
     return () => {
       clearInterval(id)
-      document.removeEventListener('visibilitychange', update)
+      document.removeEventListener('visibilitychange', forceUpdate)
+      window.removeEventListener('focus', forceUpdate)
     }
   }, [])
+  const now = Date.now()
 
   const displayAccounts = getDisplayAccounts(accounts, courts, selected, selectMode, now)
   const unused = displayAccounts.filter(a => a.status === 'unused')
