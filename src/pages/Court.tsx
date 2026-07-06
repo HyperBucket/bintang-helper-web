@@ -78,6 +78,15 @@ export function CourtPage() {
     : remaining <= 15 * 60 * 1000 ? 'timer-warning'
     : 'timer-ok'
 
+  // Projected schedule: each queue slot starts when the previous session
+  // ends (or at its own scheduled time, if later)
+  let chainEnd = currentSession ? expiry : now
+  const queueTimes = court.queue.map(s => {
+    const start = Math.max(chainEnd, s.startTime)
+    chainEnd = start + SESSION_DURATION
+    return { start, end: chainEnd }
+  })
+
   const getAccount = (aid: string) => accounts.find(a => a.id === aid)
 
   const busyIds = new Set<string>()
@@ -351,7 +360,6 @@ export function CourtPage() {
           ) : (
             court.queue.map((session, idx) => {
               const isUpNext = idx === 0
-              const qScheduled = session.startTime > now
               const needsFix = session.accountIds.length === 1 || session.accountIds.length === 3
               return (
                 <div className="queue-item" key={session.id}>
@@ -359,11 +367,9 @@ export function CourtPage() {
                     <div className="flex items-center gap-2">
                       <span className="queue-title">Queue {idx + 1}</span>
                       {isUpNext && <span className="badge badge-success">Up Next</span>}
-                      {qScheduled && (
-                        <span className="badge badge-purple">
-                          {formatClockTime(session.startTime)}
-                        </span>
-                      )}
+                      <span className="badge badge-purple">
+                        {formatClockTime(queueTimes[idx].start)} → {formatClockTime(queueTimes[idx].end)}
+                      </span>
                       {needsFix && (
                         <span className="badge badge-warning">{session.accountIds.length} player{session.accountIds.length > 1 ? 's' : ''} — needs 2 or 4</span>
                       )}

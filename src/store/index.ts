@@ -94,6 +94,7 @@ interface AppStore {
   joinSession:             (courtId: string, accountIds: string[]) => void
 
   addToQueue:          (courtId: string, accountIds: string[], capacity: 2 | 4, startTime?: number) => void
+  advanceCourt:        (courtId: string) => void
   removeQueue:         (courtId: string, sessionId: string) => void
   joinQueue:           (courtId: string, sessionId: string, accountIds: string[]) => void
   replacePlayerInQueue:(courtId: string, sessionId: string, oldAccountId: string, newAccountId: string) => void
@@ -137,8 +138,12 @@ export const useStore = create<AppStore>((set, get) => ({
         }
       })
 
-    // Courts: fetch from relational tables
-    fetchCourtsFromDB().then(courts => set({ courts, synced: true }))
+    // Courts: fetch from relational tables, then replay any sessions that
+    // expired while no client was open
+    fetchCourtsFromDB().then(courts => {
+      set({ courts, synced: true })
+      get().tick()
+    })
 
     // ── Real-time subscriptions ──────────────────────────────────────
 
@@ -270,7 +275,8 @@ export const useStore = create<AppStore>((set, get) => ({
 
     const currentId = court.current.id
     const nextSession = court.queue[0] ?? null
-    const newStartTime = Date.now()
+    // Ending early frees the court now, but honor a later scheduled start
+    const newStartTime = Math.max(Date.now(), nextSession?.startTime ?? 0)
 
     // Optimistic
     set({
@@ -339,6 +345,7 @@ export const useStore = create<AppStore>((set, get) => ({
     if (!court?.current) return
     const session = court.current
     const remaining = session.accountIds.filter(id => id !== accountId)
+    const promoteStartTime = Math.max(Date.now(), court.queue[0]?.startTime ?? 0)
 
     // Optimistic
     set({
@@ -347,7 +354,7 @@ export const useStore = create<AppStore>((set, get) => ({
         if (remaining.length === 0) {
           if (c.queue.length > 0) {
             const [next, ...rest] = c.queue
-            return { ...c, current: { ...next, startTime: Date.now() }, queue: rest }
+            return { ...c, current: { ...next, startTime: promoteStartTime }, queue: rest }
           }
           return { ...c, current: null }
         }
@@ -363,7 +370,7 @@ export const useStore = create<AppStore>((set, get) => ({
         await supabase.from('sessions').delete().eq('id', session.id)
         if (court.queue[0]) {
           await supabase.from('sessions')
-            .update({ status: 'current', start_time: Date.now() })
+            .update({ status: 'current', start_time: promoteStartTime })
             .eq('id', court.queue[0].id)
         }
       } else {
@@ -514,7 +521,50 @@ export const useStore = create<AppStore>((set, get) => ({
 
   // ── Refresh (re-fetch from DB, used on visibility change) ────────────
   refresh() {
-    fetchCourtsFromDB().then(courts => set({ courts }))
+    fetchCourtsFromDB().then(courts => {
+      set({ courts })
+      get().tick()
+    })
+  },
+
+  // ── Advance (natural expiry) ──────────────────────────────────────────
+  // Replay every session whose end time has passed. A promoted session
+  // starts when the previous one ended (or at its own scheduled time if
+  // later) — NOT at Date.now() — so the schedule stays correct even when
+  // sessions expired while no page was open to run the timer.
+  advanceCourt(courtId) {
+    const court = get().courts.find(c => c.id === courtId)
+    if (!court?.current) return
+    const now = Date.now()
+
+    const endedIds: string[] = []
+    let current: Session | null = court.current
+    let queue = court.queue
+    while (current && current.startTime + SESSION_DURATION <= now) {
+      endedIds.push(current.id)
+      if (queue.length > 0) {
+        const [next, ...rest] = queue
+        const start = Math.max(current.startTime + SESSION_DURATION, next.startTime)
+        current = { ...next, startTime: start }
+        queue = rest
+      } else {
+        current = null
+      }
+    }
+    if (endedIds.length === 0) return
+
+    const promoted = current
+    set({ courts: get().courts.map(c => c.id === courtId ? { ...c, current, queue } : c) })
+
+    const doWrite = async () => {
+      await supabase.from('sessions').delete().in('id', endedIds)
+      if (promoted) {
+        await supabase.from('sessions')
+          .update({ status: 'current', start_time: promoted.startTime })
+          .eq('id', promoted.id)
+      }
+    }
+    doWrite()
   },
 
   // ── Tick ──────────────────────────────────────────────────────────────
@@ -527,8 +577,8 @@ export const useStore = create<AppStore>((set, get) => ({
       if (processingCourts.has(court.id)) continue
       processingCourts.add(court.id)
       if (navigator.vibrate) navigator.vibrate(400)
-      // endSession handles both optimistic update and DB writes
-      get().endSession(court.id)
+      // advanceCourt handles both optimistic update and DB writes
+      get().advanceCourt(court.id)
       // Remove from processing after a short delay to prevent re-entry
       setTimeout(() => processingCourts.delete(court.id), 2000)
     }

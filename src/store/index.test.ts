@@ -3,22 +3,28 @@ import { useStore } from './index'
 import type { Account, Court, Session } from '../types'
 
 // ── Supabase mock ────────────────────────────────────────────────────────────
-vi.mock('../lib/supabase', () => ({
-  supabase: {
-    from: vi.fn().mockReturnValue({
-      upsert: vi.fn().mockResolvedValue({ data: null, error: null }),
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: null, error: 'no row' }),
-        }),
+// Chainable, awaitable query builder: every method returns the builder, and
+// awaiting it (or calling .then) resolves to an empty successful result.
+vi.mock('../lib/supabase', () => {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const builder: any = {}
+  for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'in', 'order', 'single']) {
+    builder[m] = vi.fn().mockReturnValue(builder)
+  }
+  builder.then = (onFulfilled: any, onRejected: any) =>
+    Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected)
+  return {
+    supabase: {
+      from: vi.fn().mockReturnValue(builder),
+      channel: vi.fn().mockReturnValue({
+        on: vi.fn().mockReturnThis(),
+        subscribe: vi.fn(),
       }),
-    }),
-    channel: vi.fn().mockReturnValue({
-      on: vi.fn().mockReturnThis(),
-      subscribe: vi.fn(),
-    }),
-  },
-}))
+      getChannels: vi.fn().mockReturnValue([]),
+      removeChannel: vi.fn(),
+    },
+  }
+})
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -225,6 +231,18 @@ describe('endSession', () => {
     useStore.getState().endSession('c1')
     expect(useStore.getState().courts[0].current?.startTime).toBe(now)
   })
+
+  it('honors a queued session scheduled later than now when ending early', () => {
+    const now = 2_000_000
+    vi.setSystemTime(now)
+    const scheduled = now + 10 * 60 * 1000
+    const current = makeSession({ id: 's1' })
+    const queued = makeSession({ id: 's2', startTime: scheduled })
+    const court = makeCourt({ id: 'c1', current, queue: [queued] })
+    useStore.setState({ courts: [court] })
+    useStore.getState().endSession('c1')
+    expect(useStore.getState().courts[0].current?.startTime).toBe(scheduled)
+  })
 })
 
 describe('replacePlayerInSession', () => {
@@ -293,14 +311,13 @@ describe('joinSession', () => {
     expect(useStore.getState().courts[0].current?.accountIds).toEqual(['p1', 'p2', 'p3', 'p4'])
   })
 
-  it('sets capacity to max(current_capacity, new_count) capped at 4', () => {
-    // capacity formula: Math.min(4, Math.max(current_capacity, newIds.length))
-    // 2 existing + 1 joining → 3 total → capacity becomes 3
+  it('upgrades capacity to 4 when total players exceed 2', () => {
+    // capacity formula: newIds.length <= 2 ? 2 : 4
     const session = makeSession({ accountIds: ['p1', 'p2'], capacity: 2 })
     const court = makeCourt({ id: 'c1', current: session })
     useStore.setState({ courts: [court] })
     useStore.getState().joinSession('c1', ['p3'])
-    expect(useStore.getState().courts[0].current?.capacity).toBe(3)
+    expect(useStore.getState().courts[0].current?.capacity).toBe(4)
   })
 
   it('keeps capacity at 2 when total players stay at 2', () => {
@@ -444,6 +461,8 @@ describe('promoteQueue', () => {
 })
 
 // ── Tick ──────────────────────────────────────────────────────────────────────
+// Note: tick() guards each court id in a module-level Set for 2s after acting
+// on it, so these tests use a distinct court id per test.
 
 describe('tick', () => {
   const SESSION_DURATION = 45 * 60 * 1000
@@ -451,7 +470,7 @@ describe('tick', () => {
   it('does not change courts when no session has expired', () => {
     const now = Date.now()
     const session = makeSession({ startTime: now - 1000 }) // only 1s old
-    const court = makeCourt({ id: 'c1', current: session })
+    const court = makeCourt({ id: 'tick1', current: session })
     useStore.setState({ courts: [court] })
     useStore.getState().tick()
     expect(useStore.getState().courts[0].current?.id).toBe(session.id)
@@ -460,7 +479,7 @@ describe('tick', () => {
   it('clears current when session expires and queue is empty', () => {
     vi.setSystemTime(SESSION_DURATION + 10_000)
     const session = makeSession({ startTime: 0 }) // started at epoch, expired long ago
-    const court = makeCourt({ id: 'c1', current: session, queue: [] })
+    const court = makeCourt({ id: 'tick2', current: session, queue: [] })
     useStore.setState({ courts: [court] })
     useStore.getState().tick()
     expect(useStore.getState().courts[0].current).toBeNull()
@@ -469,8 +488,8 @@ describe('tick', () => {
   it('promotes queue when session expires with queued sessions', () => {
     vi.setSystemTime(SESSION_DURATION + 10_000)
     const current = makeSession({ id: 's1', startTime: 0 })
-    const queued = makeSession({ id: 's2', accountIds: ['p3', 'p4'] })
-    const court = makeCourt({ id: 'c1', current, queue: [queued] })
+    const queued = makeSession({ id: 's2', accountIds: ['p3', 'p4'], startTime: 0 })
+    const court = makeCourt({ id: 'tick3', current, queue: [queued] })
     useStore.setState({ courts: [court] })
     useStore.getState().tick()
     expect(useStore.getState().courts[0].current?.id).toBe('s2')
@@ -478,9 +497,71 @@ describe('tick', () => {
   })
 
   it('handles courts with no current session without crashing', () => {
-    const court = makeCourt({ id: 'c1', current: null })
+    const court = makeCourt({ id: 'tick4', current: null })
     useStore.setState({ courts: [court] })
     expect(() => useStore.getState().tick()).not.toThrow()
+  })
+})
+
+// ── AdvanceCourt (catch-up after the page was closed) ─────────────────────────
+
+describe('advanceCourt', () => {
+  const SESSION_DURATION = 45 * 60 * 1000
+
+  it('starts the promoted session at the previous session end, not now', () => {
+    // Session ran 0 → 45min; page reopened 10 minutes after it ended
+    vi.setSystemTime(SESSION_DURATION + 10 * 60 * 1000)
+    const current = makeSession({ id: 's1', startTime: 0 })
+    const queued = makeSession({ id: 's2', startTime: 0 })
+    useStore.setState({ courts: [makeCourt({ id: 'adv1', current, queue: [queued] })] })
+    useStore.getState().advanceCourt('adv1')
+    const court = useStore.getState().courts[0]
+    expect(court.current?.id).toBe('s2')
+    expect(court.current?.startTime).toBe(SESSION_DURATION)
+    expect(court.queue).toHaveLength(0)
+  })
+
+  it('replays multiple sessions that expired while the page was closed', () => {
+    vi.setSystemTime(2 * SESSION_DURATION + 60_000)
+    const current = makeSession({ id: 's1', startTime: 0 })
+    const q1 = makeSession({ id: 's2', startTime: 0 })
+    const q2 = makeSession({ id: 's3', startTime: 0 })
+    useStore.setState({ courts: [makeCourt({ id: 'adv2', current, queue: [q1, q2] })] })
+    useStore.getState().advanceCourt('adv2')
+    const court = useStore.getState().courts[0]
+    expect(court.current?.id).toBe('s3')
+    expect(court.current?.startTime).toBe(2 * SESSION_DURATION)
+    expect(court.queue).toHaveLength(0)
+  })
+
+  it('respects a queued session scheduled later than the previous end', () => {
+    const scheduled = SESSION_DURATION + 30 * 60 * 1000
+    vi.setSystemTime(SESSION_DURATION + 1000)
+    const current = makeSession({ id: 's1', startTime: 0 })
+    const queued = makeSession({ id: 's2', startTime: scheduled })
+    useStore.setState({ courts: [makeCourt({ id: 'adv3', current, queue: [queued] })] })
+    useStore.getState().advanceCourt('adv3')
+    const court = useStore.getState().courts[0]
+    expect(court.current?.id).toBe('s2')
+    expect(court.current?.startTime).toBe(scheduled)
+  })
+
+  it('clears current when everything has expired and queue is empty', () => {
+    vi.setSystemTime(3 * SESSION_DURATION)
+    const current = makeSession({ id: 's1', startTime: 0 })
+    const queued = makeSession({ id: 's2', startTime: 0 })
+    useStore.setState({ courts: [makeCourt({ id: 'adv4', current, queue: [queued] })] })
+    useStore.getState().advanceCourt('adv4')
+    expect(useStore.getState().courts[0].current).toBeNull()
+    expect(useStore.getState().courts[0].queue).toHaveLength(0)
+  })
+
+  it('does nothing when the current session has not expired', () => {
+    vi.setSystemTime(1_000_000)
+    const current = makeSession({ id: 's1', startTime: 999_000 })
+    useStore.setState({ courts: [makeCourt({ id: 'adv5', current })] })
+    useStore.getState().advanceCourt('adv5')
+    expect(useStore.getState().courts[0].current?.id).toBe('s1')
   })
 })
 
